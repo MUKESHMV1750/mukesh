@@ -1,0 +1,12 @@
+@import './styles/global.css';
+@import './styles/dashboard.css';
+@import './styles/files.css';
+@import './styles/login.css';
+@import './styles/responsive.css';
+
+#root {
+  min-height: 100vh;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
