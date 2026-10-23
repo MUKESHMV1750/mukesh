@@ -62,11 +62,13 @@ export default function Login() {
       }, 500);
     } catch (err) {
       let msg = err.response?.data?.message || err.response?.data?.error;
-      if (err.response?.status === 404 || msg === 'Route not found') {
-        msg = 'Backend route not found (404). Please ensure VITE_API_URL in Vercel settings points to your Render backend (e.g. https://your-app.onrender.com).';
+      if (err.response?.status === 405) {
+        msg = 'Vercel API rewrite error (405). The request reached index.html instead of the backend function. Please verify Vercel Root Directory is set to root ("./") and not "client".';
+      } else if (err.response?.status === 404 || msg === 'Route not found') {
+        msg = 'Backend route not found (404). Please ensure VITE_API_URL in Vercel settings is set to /api/v1 (or your active backend URL).';
       } else if (!msg) {
         if (!err.response || err.code === 'ERR_NETWORK' || err.message?.includes('Network') || err.message?.includes('ECONNREFUSED')) {
-          msg = 'Unable to connect to backend server. Please verify your Render/local server is running and awake.';
+          msg = 'Unable to connect to backend server. Please verify your backend server is awake and VITE_API_URL is not set to a protected preview URL.';
         } else {
           msg = 'Invalid administrator password. Please try again.';
         }

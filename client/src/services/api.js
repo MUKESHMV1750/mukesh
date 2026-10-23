@@ -9,6 +9,13 @@ function resolveBaseUrl() {
 
   // If a full domain URL is passed (e.g. https://xxx.onrender.com)
   if (/^https?:\/\//i.test(raw)) {
+    try {
+      const parsed = new URL(raw);
+      if (typeof window !== 'undefined' && parsed.hostname === window.location.hostname) {
+        return '/api/v1';
+      }
+    } catch (e) {}
+
     if (!raw.includes('/api')) {
       return `${raw}/api/v1`;
     }
@@ -19,7 +26,8 @@ function resolveBaseUrl() {
   return raw;
 }
 
-const API_URL = resolveBaseUrl();
+export const API_BASE_URL = resolveBaseUrl();
+const API_URL = API_BASE_URL;
 
 const api = axios.create({
   baseURL: API_URL,

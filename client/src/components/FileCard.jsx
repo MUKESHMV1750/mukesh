@@ -4,7 +4,7 @@ import {
   Edit2, FolderInput, Trash2, RotateCcw, AlertOctagon,
   Loader
 } from 'lucide-react';
-import api from '../services/api';
+import api, { API_BASE_URL } from '../services/api';
 import { getFileIcon } from '../utils/fileIcons';
 import { formatFileSize, formatDate, isPreviewable } from '../utils/formatFileSize';
 
@@ -81,8 +81,7 @@ export default function FileCard({
       .catch((err) => {
         if (!isMounted) return;
         // Fallback: try direct backend URL
-        const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
-        const fallbackUrl = `${apiBase}/files/${file.file_id}/download?inline=true`;
+        const fallbackUrl = `${API_BASE_URL}/files/${file.file_id}/download?inline=true`;
         setThumbnailUrl(fallbackUrl);
         setThumbnailLoading(false);
       });

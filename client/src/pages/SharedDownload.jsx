@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { Download, FileText, CheckCircle2, ShieldCheck, Lock, ExternalLink } from 'lucide-react';
 import DriveXLogo from '../components/DriveXLogo';
+import { API_BASE_URL } from '../services/api';
 
 export default function SharedDownload() {
   const { token } = useParams();
@@ -9,8 +10,7 @@ export default function SharedDownload() {
   const [downloadUrl, setDownloadUrl] = useState('');
 
   useEffect(() => {
-    const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
-    setDownloadUrl(`${apiBase}/share/${token}`);
+    setDownloadUrl(`${API_BASE_URL}/share/${token}`);
   }, [token]);
 
   const handleDownload = () => {
