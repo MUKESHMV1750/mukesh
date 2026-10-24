@@ -474,6 +474,8 @@ async function getRecentFiles(req, res, next) {
   } catch (err) {
     next(err);
   }
+}
+
 /**
  * POST /api/v1/files/:id/reupload
  */
