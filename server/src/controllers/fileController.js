@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const sheetsService = require('../services/sheetsService');
 const driveService = require('../services/driveService');
+const fileStorageService = require('../services/fileStorageService');
 const uploadService = require('../services/uploadService');
 const AppError = require('../utils/AppError');
 const { appendRow, readSheet } = require('../config/googleSheets');
@@ -154,51 +155,31 @@ async function downloadFile(req, res, next) {
     const isInline = req.query.inline === 'true' || req.query.view === 'true' || req.query.thumbnail === 'true';
     const mimeType = resolveMimeType(file.file_name, file.mime_type);
 
+    const fileStreamObj = await fileStorageService.getFileStream(file);
+
+    if (!fileStreamObj) {
+      if (req.query.thumbnail === 'true') {
+        return res.status(404).json({ success: false, message: 'Thumbnail not available' });
+      }
+      throw new AppError('File content not found. This file may have expired from temporary storage. Please re-upload.', 404);
+    }
+
     res.setHeader('Content-Type', mimeType);
     res.setHeader(
       'Content-Disposition',
       `${isInline ? 'inline' : 'attachment'}; filename="${encodeURIComponent(file.file_name)}"`
     );
 
+    if (fileStreamObj.size) {
+      res.setHeader('Content-Length', fileStreamObj.size);
+    }
+
     // Cache thumbnails and inline previews for 24 hours
     if (isInline) {
       res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=3600');
     }
 
-    // 1. Check local storage
-    let localPath = path.join(uploadsDir, `${file.file_id}_${file.file_name}`);
-    if (!fs.existsSync(localPath) && fs.existsSync(uploadsDir)) {
-      try {
-        const diskFiles = fs.readdirSync(uploadsDir);
-        const match = diskFiles.find((f) => f.startsWith(`${file.file_id}_`));
-        if (match) {
-          localPath = path.join(uploadsDir, match);
-        }
-      } catch (e) {}
-    }
-
-    if (fs.existsSync(localPath)) {
-      return fs.createReadStream(localPath).pipe(res);
-    }
-
-    // 2. Otherwise download from Google Drive
-    if (file.drive_file_id && !file.drive_file_id.startsWith('local_')) {
-      try {
-        const stream = await driveService.downloadFromDrive(file.drive_file_id);
-        return stream.pipe(res);
-      } catch (driveErr) {
-        console.warn(`Drive download stream notice for ${file.file_id}:`, driveErr.message);
-        if (req.query.thumbnail === 'true') {
-          const meta = await driveService.getFileInfo(file.drive_file_id).catch(() => null);
-          if (meta?.thumbnailLink) {
-            return res.redirect(meta.thumbnailLink);
-          }
-        }
-        throw driveErr;
-      }
-    }
-
-    throw new AppError('File content not found', 404);
+    return fileStreamObj.stream.pipe(res);
   } catch (err) {
     next(err);
   }
@@ -435,19 +416,10 @@ async function permanentDelete(req, res, next) {
     const file = await sheetsService.getFileById(req.params.id);
     if (!file) throw new AppError('File not found', 404);
 
-    // 1. Delete from Google Drive if real Drive file
-    if (file.drive_file_id && !file.drive_file_id.startsWith('local_')) {
-      try {
-        await driveService.removeFromDrive(file.drive_file_id);
-      } catch (driveErr) {
-        console.warn(`Drive remove notice for ${file.drive_file_id}:`, driveErr.message);
-      }
-    }
+    // 1. Delete file content from storage (Drive, Sheets FileData, local cache)
+    await fileStorageService.deleteFileContent(file);
 
-    // 2. Delete local file from disk
-    deleteLocalFile(file.file_id);
-
-    // 3. Delete from Sheets
+    // 2. Delete from Sheets
     await sheetsService.deleteFileRecord(req.params.id);
 
     try {
@@ -470,20 +442,10 @@ async function emptyTrash(req, res, next) {
     const trashedFiles = await sheetsService.getAllFiles({ is_trashed: true });
 
     for (const file of trashedFiles) {
-      // 1. Delete from Google Drive if real Drive file
-      if (file.drive_file_id && !file.drive_file_id.startsWith('local_')) {
-        try {
-          await driveService.removeFromDrive(file.drive_file_id);
-        } catch (driveErr) {
-          console.warn(`Drive remove notice for ${file.drive_file_id}:`, driveErr.message);
-        }
-      }
-
-      // 2. Delete from local disk
-      deleteLocalFile(file.file_id);
+      await fileStorageService.deleteFileContent(file);
     }
 
-    // 3. Purge all trashed records from Google Sheets
+    // Purge all trashed records from Google Sheets
     const purgedCount = await sheetsService.emptyTrashRecords();
 
     try {
@@ -512,11 +474,48 @@ async function getRecentFiles(req, res, next) {
   } catch (err) {
     next(err);
   }
+/**
+ * POST /api/v1/files/:id/reupload
+ */
+async function reuploadFile(req, res, next) {
+  try {
+    const file = await sheetsService.getFileById(req.params.id);
+    if (!file) throw new AppError('File not found', 404);
+
+    const uploaded = req.file || (req.files && req.files[0]);
+    if (!uploaded) {
+      throw new AppError('No file provided for re-upload', 400);
+    }
+
+    const { driveFileId } = await fileStorageService.saveFile(
+      file.file_id,
+      uploaded.buffer,
+      uploaded.originalname || file.file_name,
+      uploaded.mimetype || file.mime_type,
+      file.folder_id || undefined
+    );
+
+    const updated = await sheetsService.updateFile(file.file_id, {
+      file_name: uploaded.originalname || file.file_name,
+      size_bytes: uploaded.size,
+      mime_type: uploaded.mimetype || file.mime_type,
+      drive_file_id: driveFileId,
+    });
+
+    res.json({
+      success: true,
+      message: 'File content re-uploaded successfully',
+      data: updated,
+    });
+  } catch (err) {
+    next(err);
+  }
 }
 
 module.exports = {
   listFiles,
   uploadFiles,
+  reuploadFile,
   previewFile,
   downloadFile,
   renameFile,

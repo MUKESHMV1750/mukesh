@@ -80,8 +80,15 @@ export default function FileCard({
       })
       .catch((err) => {
         if (!isMounted) return;
-        // Fallback: try direct backend URL
-        const fallbackUrl = `${API_BASE_URL}/files/${file.file_id}/download?inline=true`;
+        if (err.response?.status === 404) {
+          setThumbnailError(true);
+          setThumbnailLoading(false);
+          return;
+        }
+        // Fallback: try direct backend URL with token for authenticated access
+        const token = localStorage.getItem('drivex_admin_token') || '';
+        const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
+        const fallbackUrl = `${API_BASE_URL}/files/${file.file_id}/download?inline=true${tokenParam}`;
         setThumbnailUrl(fallbackUrl);
         setThumbnailLoading(false);
       });

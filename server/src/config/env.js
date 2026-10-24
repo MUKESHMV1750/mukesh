@@ -8,28 +8,48 @@ try {
 } catch (e) {}
 
 function cleanId(val) {
-  if (!val) return val;
-  const sheetMatch = val.match(/\/d\/([a-zA-Z0-9-_]+)/);
+  if (!val || typeof val !== 'string') return val;
+  let cleaned = val.trim();
+  if ((cleaned.startsWith('"') && cleaned.endsWith('"')) || (cleaned.startsWith("'") && cleaned.endsWith("'"))) {
+    cleaned = cleaned.slice(1, -1).trim();
+  }
+  const sheetMatch = cleaned.match(/\/d\/([a-zA-Z0-9-_]+)/);
   if (sheetMatch) return sheetMatch[1];
-  const folderMatch = val.match(/\/folders\/([a-zA-Z0-9-_]+)/);
+  const folderMatch = cleaned.match(/\/folders\/([a-zA-Z0-9-_]+)/);
   if (folderMatch) return folderMatch[1];
-  return val.split('/')[0].split('?')[0].split('#')[0].trim();
+  return cleaned.split('/')[0].split('?')[0].split('#')[0].trim();
+}
+
+function cleanString(val) {
+  if (!val || typeof val !== 'string') return val;
+  let cleaned = val.trim();
+  if ((cleaned.startsWith('"') && cleaned.endsWith('"')) || (cleaned.startsWith("'") && cleaned.endsWith("'"))) {
+    cleaned = cleaned.slice(1, -1).trim();
+  }
+  return cleaned;
+}
+
+function cleanPrivateKey(key) {
+  if (!key || typeof key !== 'string') return undefined;
+  let cleaned = key.trim();
+  if ((cleaned.startsWith('"') && cleaned.endsWith('"')) || (cleaned.startsWith("'") && cleaned.endsWith("'"))) {
+    cleaned = cleaned.slice(1, -1).trim();
+  }
+  return cleaned.replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n').replace(/\r/g, '');
 }
 
 const config = {
   port: process.env.PORT || 5000,
   nodeEnv: process.env.NODE_ENV || 'development',
-  clientUrl: process.env.CLIENT_URL || 'http://localhost:5173',
+  clientUrl: cleanString(process.env.CLIENT_URL) || 'http://localhost:5173',
   adminPasswordHash:
-    process.env.ADMIN_PASSWORD_HASH ||
+    cleanString(process.env.ADMIN_PASSWORD_HASH) ||
     '$2a$10$qS0INoAz8ocSRYAdL1Gbuuf19WcNjgx4o/MybmSroScwFNmmwlSKu',
-  sessionSecret: process.env.SESSION_SECRET || 'drivex-dev-secret-change-me',
+  sessionSecret: cleanString(process.env.SESSION_SECRET) || 'drivex-dev-secret-change-me',
   google: {
     spreadsheetId: cleanId(process.env.GOOGLE_SHEETS_SPREADSHEET_ID),
-    serviceAccountEmail: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-    privateKey: process.env.GOOGLE_PRIVATE_KEY
-      ? process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n')
-      : undefined,
+    serviceAccountEmail: cleanString(process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL),
+    privateKey: cleanPrivateKey(process.env.GOOGLE_PRIVATE_KEY),
     driveFolderId: cleanId(process.env.GOOGLE_DRIVE_FOLDER_ID),
   },
 };

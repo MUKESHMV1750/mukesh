@@ -133,6 +133,9 @@ async function updateFile(fileId, updates) {
   const currentRow = rows[rowIndex - 1];
 
   if (updates.file_name !== undefined) currentRow[COL.FILE_NAME] = updates.file_name;
+  if (updates.mime_type !== undefined) currentRow[COL.MIME_TYPE] = updates.mime_type;
+  if (updates.size_bytes !== undefined) currentRow[COL.SIZE_BYTES] = String(updates.size_bytes);
+  if (updates.drive_file_id !== undefined) currentRow[COL.DRIVE_FILE_ID] = updates.drive_file_id;
   if (updates.folder_id !== undefined) currentRow[COL.FOLDER_ID] = updates.folder_id;
   if (updates.is_starred !== undefined) currentRow[COL.IS_STARRED] = String(updates.is_starred);
   if (updates.is_trashed !== undefined) currentRow[COL.IS_TRASHED] = String(updates.is_trashed);

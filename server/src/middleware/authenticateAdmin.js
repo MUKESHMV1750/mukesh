@@ -15,6 +15,10 @@ function extractToken(req) {
   if (req.headers['x-admin-token']) {
     return req.headers['x-admin-token'];
   }
+  // Allow token via query param for direct media previews (img, video, audio, pdf)
+  if (req.query && (req.query.token || req.query.auth)) {
+    return req.query.token || req.query.auth;
+  }
   return null;
 }
 

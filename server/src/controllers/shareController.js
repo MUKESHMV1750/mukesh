@@ -1,11 +1,7 @@
-const fs = require('fs');
-const path = require('path');
 const shareService = require('../services/shareService');
 const sheetsService = require('../services/sheetsService');
-const driveService = require('../services/driveService');
+const fileStorageService = require('../services/fileStorageService');
 const AppError = require('../utils/AppError');
-
-const uploadsDir = require('../utils/uploadsDir');
 
 /**
  * POST /api/v1/files/:id/share
@@ -70,19 +66,16 @@ async function accessSharedFile(req, res, next) {
       `attachment; filename="${encodeURIComponent(file.file_name)}"`
     );
 
-    // If stored locally
-    const localPath = path.join(uploadsDir, `${file.file_id}_${file.file_name}`);
-    if (fs.existsSync(localPath)) {
-      return fs.createReadStream(localPath).pipe(res);
+    const fileStreamObj = await fileStorageService.getFileStream(file);
+    if (!fileStreamObj) {
+      throw new AppError('File content not found or expired', 404);
     }
 
-    // Otherwise download from Google Drive
-    if (file.drive_file_id && !file.drive_file_id.startsWith('local_')) {
-      const stream = await driveService.downloadFromDrive(file.drive_file_id);
-      return stream.pipe(res);
+    if (fileStreamObj.size) {
+      res.setHeader('Content-Length', fileStreamObj.size);
     }
 
-    throw new AppError('File content not found', 404);
+    return fileStreamObj.stream.pipe(res);
   } catch (err) {
     next(err);
   }

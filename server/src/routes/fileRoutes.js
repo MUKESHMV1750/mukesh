@@ -10,6 +10,7 @@ router.use(authenticateAdmin);
 router.get('/', fileController.listFiles);
 router.get('/recent', fileController.getRecentFiles);
 router.post('/upload', upload.array('files', 10), handleMulterError, fileController.uploadFiles);
+router.post('/:id/reupload', upload.single('file'), handleMulterError, fileController.reuploadFile);
 router.get('/:id/preview', fileController.previewFile);
 router.get('/:id/download', fileController.downloadFile);
 router.patch('/:id/rename', fileController.renameFile);

@@ -1,15 +1,10 @@
 const sheetsService = require('./sheetsService');
-const driveService = require('./driveService');
+const fileStorageService = require('./fileStorageService');
 const { generateId } = require('../utils/generateToken');
-
 const { readSheet } = require('../config/googleSheets');
 
-const fs = require('fs');
-const path = require('path');
-const uploadsDir = require('../utils/uploadsDir');
-
 /**
- * Upload a file: store in Drive (or local fallback) and record metadata in Sheets
+ * Upload a file: store persistently (Drive / Sheets FileData) and record metadata in Sheets
  */
 async function processUpload(file, folderId, preResolvedDriveFolderId = null) {
   let targetDriveFolderId = preResolvedDriveFolderId;
@@ -26,23 +21,15 @@ async function processUpload(file, folderId, preResolvedDriveFolderId = null) {
   }
 
   const fileId = generateId();
-  let driveFileId = '';
 
-  // Attempt upload to Google Drive
-  try {
-    const driveResult = await driveService.uploadToDrive(
-      file.buffer,
-      file.originalname,
-      file.mimetype,
-      targetDriveFolderId || undefined
-    );
-    driveFileId = driveResult.id;
-  } catch (driveErr) {
-    console.warn(`Drive upload notice for "${file.originalname}": ${driveErr.message}. Storing locally.`);
-    driveFileId = 'local_' + fileId;
-    const localFilePath = path.join(uploadsDir, `${fileId}_${file.originalname}`);
-    fs.writeFileSync(localFilePath, file.buffer);
-  }
+  // Persist file content (Google Drive if available, else Google Sheets FileData tab, + local cache)
+  const { driveFileId } = await fileStorageService.saveFile(
+    fileId,
+    file.buffer,
+    file.originalname,
+    file.mimetype,
+    targetDriveFolderId || undefined
+  );
 
   // Record in Google Sheets
   const fileRecord = await sheetsService.addFile({

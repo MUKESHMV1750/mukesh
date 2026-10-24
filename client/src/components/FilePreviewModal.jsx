@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import {
-  X, Download, Share2, FileQuestion, ZoomIn, ZoomOut, RotateCcw, AlertCircle
+  X, Download, Share2, FileQuestion, ZoomIn, ZoomOut, RotateCcw, AlertCircle, Upload, RefreshCw
 } from 'lucide-react';
 import api from '../services/api';
 import fileService from '../services/fileService';
@@ -10,6 +10,7 @@ export default function FilePreviewModal({
   onClose,
   onDownload,
   onShare,
+  onFileUpdated,
 }) {
   const [previewData, setPreviewData] = useState(null);
   const [metadataLoading, setMetadataLoading] = useState(true);
@@ -21,8 +22,12 @@ export default function FilePreviewModal({
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [imageLoading, setImageLoading] = useState(true);
   const [imageError, setImageError] = useState(false);
+  const [imageErrorMessage, setImageErrorMessage] = useState('');
+  const [isReuploading, setIsReuploading] = useState(false);
+  const [reuploadError, setReuploadError] = useState(null);
   const [blobUrl, setBlobUrl] = useState(null);
   const imageContainerRef = useRef(null);
+  const reuploadInputRef = useRef(null);
 
   const mime = file?.mime_type || '';
   const isImage = mime.startsWith('image/') || /\.(jpe?g|png|gif|webp|svg|bmp)$/i.test(file?.file_name || '');
@@ -33,6 +38,7 @@ export default function FilePreviewModal({
     setPan({ x: 0, y: 0 });
     setImageLoading(true);
     setImageError(false);
+    setImageErrorMessage('');
   }, [file?.file_id]);
 
   // Authenticated Blob loader for images
@@ -42,6 +48,7 @@ export default function FilePreviewModal({
     let isMounted = true;
     setImageLoading(true);
     setImageError(false);
+    setImageErrorMessage('');
 
     let activeBlobUrl = null;
 
@@ -52,13 +59,26 @@ export default function FilePreviewModal({
         activeBlobUrl = URL.createObjectURL(res.data);
         setBlobUrl(activeBlobUrl);
         setImageLoading(false);
+        setImageError(false);
       })
       .catch((err) => {
-        console.warn('Blob fetch failed, falling back to direct URL:', err.message);
-        if (isMounted) {
-          const API_BASE = api.defaults.baseURL || '/api/v1';
-          setBlobUrl(`${API_BASE}/files/${file.file_id}/download?inline=true`);
+        if (!isMounted) return;
+        console.warn('Blob fetch failed:', err.message);
+        const is404 = err.response?.status === 404;
+        if (is404) {
+          setImageLoading(false);
+          setImageError(true);
+          setImageErrorMessage(
+            err.response?.data?.message ||
+            'The content for this image was stored in temporary cloud storage and has expired. Please re-upload below.'
+          );
+          return;
         }
+
+        const token = localStorage.getItem('drivex_admin_token') || '';
+        const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
+        const API_BASE = api.defaults.baseURL || '/api/v1';
+        setBlobUrl(`${API_BASE}/files/${file.file_id}/download?inline=true${tokenParam}`);
       });
 
     return () => {
@@ -114,10 +134,18 @@ export default function FilePreviewModal({
 
   if (!file) return null;
 
+  const token = localStorage.getItem('drivex_admin_token') || '';
+  const tokenQuery = token ? `token=${encodeURIComponent(token)}` : '';
+  const withAuthToken = (url) => {
+    if (!url || !token) return url;
+    return url.includes('?') ? `${url}&${tokenQuery}` : `${url}?${tokenQuery}`;
+  };
+
   const API_BASE = api.defaults.baseURL || '/api/v1';
-  const streamUrl =
+  const rawStreamUrl =
     previewData?.stream_url ||
     `${API_BASE}/files/${file.file_id}/download?inline=true`;
+  const streamUrl = withAuthToken(rawStreamUrl);
 
   const handleZoomIn = (e) => {
     if (e) e.stopPropagation();
@@ -227,17 +255,96 @@ export default function FilePreviewModal({
     }
   };
 
+  const handleReupload = async (e) => {
+    const selectedFile = e.target.files?.[0];
+    if (!selectedFile) return;
+
+    setIsReuploading(true);
+    setReuploadError(null);
+
+    const formData = new FormData();
+    formData.append('file', selectedFile);
+
+    try {
+      const res = await fileService.reuploadFile(file.file_id, formData);
+      if (res.data?.success) {
+        // Load new blob
+        const blobRes = await api.get(`/files/${file.file_id}/download?inline=true`, {
+          responseType: 'blob',
+        });
+        const newBlobUrl = URL.createObjectURL(blobRes.data);
+        setBlobUrl(newBlobUrl);
+        setImageError(false);
+        setImageLoading(false);
+        if (onFileUpdated && res.data.data) {
+          onFileUpdated(res.data.data);
+        }
+      }
+    } catch (err) {
+      setReuploadError(err.response?.data?.message || err.message || 'Failed to re-upload image');
+    } finally {
+      setIsReuploading(false);
+      if (reuploadInputRef.current) {
+        reuploadInputRef.current.value = '';
+      }
+    }
+  };
+
   const renderContent = () => {
     if (isImage) {
       if (imageError) {
         return (
-          <div className="preview-no-support">
-            <AlertCircle size={48} color="var(--red)" />
-            <p>Failed to load image preview.</p>
-            <button className="btn btn-primary" onClick={handleDownloadAction}>
-              <Download size={18} />
-              <span>Download Image</span>
-            </button>
+          <div className="preview-no-support" style={{ maxWidth: 460, margin: '0 auto', textAlign: 'center', padding: '32px 20px' }}>
+            <AlertCircle size={52} color="#f87171" style={{ marginBottom: 16 }} />
+            <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'white', margin: '0 0 10px 0' }}>
+              Image Preview Unavailable
+            </h3>
+            <p style={{ color: 'rgba(255,255,255,0.72)', fontSize: '0.875rem', lineHeight: 1.6, margin: '0 0 24px 0' }}>
+              {imageErrorMessage || 'This image was stored in temporary storage and has expired. Re-upload it below to restore permanent preview and download.'}
+            </p>
+
+            <input
+              type="file"
+              ref={reuploadInputRef}
+              onChange={handleReupload}
+              accept="image/*"
+              style={{ display: 'none' }}
+            />
+
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
+              <button
+                className="btn btn-primary"
+                onClick={() => reuploadInputRef.current?.click()}
+                disabled={isReuploading}
+                style={{ gap: 8, padding: '10px 22px', borderRadius: 12, fontSize: '0.9rem' }}
+              >
+                {isReuploading ? (
+                  <>
+                    <RefreshCw size={18} className="spinner" />
+                    <span>Uploading...</span>
+                  </>
+                ) : (
+                  <>
+                    <Upload size={18} />
+                    <span>Re-upload This Image</span>
+                  </>
+                )}
+              </button>
+              <button
+                className="btn btn-secondary"
+                onClick={handleDownloadAction}
+                style={{ gap: 8, padding: '10px 18px', borderRadius: 12, fontSize: '0.9rem' }}
+              >
+                <Download size={18} />
+                <span>Download</span>
+              </button>
+            </div>
+
+            {reuploadError && (
+              <p style={{ color: '#fca5a5', fontSize: '0.8rem', marginTop: 14 }}>
+                {reuploadError}
+              </p>
+            )}
           </div>
         );
       }

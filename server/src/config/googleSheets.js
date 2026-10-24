@@ -16,6 +16,9 @@ const REQUIRED_SHEETS = {
   ],
   Activity: [
     ['activity_id', 'action', 'file_id', 'timestamp']
+  ],
+  FileData: [
+    ['file_id', 'chunk_index', 'chunk_data']
   ]
 };
 
@@ -177,6 +180,39 @@ async function appendRow(sheetName, values) {
 }
 
 /**
+ * Append multiple rows in a single batch (RAW mode for high-speed binary chunks)
+ */
+async function appendMultipleRows(sheetName, rows) {
+  if (!rows || rows.length === 0) return;
+  invalidateSheetCache(sheetName);
+  const sheets = await getSheetsClient();
+
+  try {
+    const response = await withTimeout(
+      sheets.spreadsheets.values.append({
+        spreadsheetId: config.google.spreadsheetId,
+        range: sheetName,
+        valueInputOption: 'RAW',
+        insertDataOption: 'INSERT_ROWS',
+        requestBody: {
+          values: rows,
+        },
+      }),
+      30000,
+      `Timed out appending multiple rows to sheet: ${sheetName}`
+    );
+
+    return response.data;
+  } catch (err) {
+    if (err.message && err.message.includes('Unable to parse range')) {
+      await ensureSheetsInitialized();
+      return appendMultipleRows(sheetName, rows);
+    }
+    throw err;
+  }
+}
+
+/**
  * Update a specific cell range (invalidates cache)
  */
 async function updateCell(sheetName, range, values) {
@@ -309,4 +345,5 @@ module.exports = {
   deleteRow,
   findRowIndex,
   replaceDataRows,
+  appendMultipleRows,
 };

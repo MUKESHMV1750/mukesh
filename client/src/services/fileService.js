@@ -11,6 +11,12 @@ export const fileService = {
       onUploadProgress: onProgress,
     }),
 
+  reuploadFile: (id, formData, onProgress) =>
+    api.post(`/files/${id}/reupload`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: onProgress,
+    }),
+
   previewFile: (id) => api.get(`/files/${id}/preview`),
 
   downloadFile: (id) =>

@@ -703,6 +703,12 @@ export default function Dashboard() {
             setPreviewTarget(null);
             setShareTarget(f);
           }}
+          onFileUpdated={(updated) => {
+            setFiles((prev) =>
+              prev.map((f) => (f.file_id === updated.file_id ? { ...f, ...updated } : f))
+            );
+            setPreviewTarget(updated);
+          }}
         />
       )}
 
