@@ -65,12 +65,21 @@ async function processMultipleUploads(files, folderId) {
     }
   }
 
-  for (const file of files) {
+  const uploadPromises = files.map(async (file) => {
     try {
       const result = await processUpload(file, folderId, targetDriveFolderId);
-      results.push(result);
+      return { success: true, result };
     } catch (err) {
-      errors.push({ fileName: file.originalname, error: err.message });
+      return { success: false, fileName: file.originalname, error: err.message };
+    }
+  });
+
+  const settled = await Promise.all(uploadPromises);
+  for (const item of settled) {
+    if (item.success) {
+      results.push(item.result);
+    } else {
+      errors.push({ fileName: item.fileName, error: item.error });
     }
   }
 

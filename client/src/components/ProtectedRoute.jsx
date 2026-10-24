@@ -9,8 +9,8 @@ export default function ProtectedRoute({ children }) {
   if (loading) {
     return (
       <div className="loading-screen">
-        <div className="spinner" />
-        <p style={{ color: 'var(--text-secondary)' }}>Loading DriveX...</p>
+        <div className="top-sync-indicator" style={{ position: 'fixed', top: 0, left: 0, width: '100%' }} />
+        <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Loading DriveX...</p>
       </div>
     );
   }

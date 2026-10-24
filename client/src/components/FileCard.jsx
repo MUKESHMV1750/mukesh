@@ -11,7 +11,7 @@ import { formatFileSize, formatDate, isPreviewable } from '../utils/formatFileSi
 // Module-level thumbnail cache to preserve object URLs across re-renders & prevent memory churn
 const thumbnailCache = new Map();
 
-export default function FileCard({
+function FileCard({
   file,
   onPreview,
   onDownload,
@@ -30,6 +30,7 @@ export default function FileCard({
   const [thumbnailError, setThumbnailError] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const menuRef = useRef(null);
+  const cardContainerRef = useRef(null);
 
   const iconInfo = getFileIcon(file.file_name);
   const IconComponent = iconInfo.icon;
@@ -40,6 +41,33 @@ export default function FileCard({
   const fileExt = file.file_name && file.file_name.includes('.')
     ? file.file_name.split('.').pop().toUpperCase()
     : 'FILE';
+
+  // Lazy loading observer: only fetch thumbnail when card enters viewport
+  const [isVisible, setIsVisible] = useState(() => !isImage || thumbnailCache.has(file?.file_id));
+
+  useEffect(() => {
+    if (!isImage || thumbnailCache.has(file?.file_id)) {
+      setIsVisible(true);
+      return;
+    }
+    if (typeof window === 'undefined' || !('IntersectionObserver' in window)) {
+      setIsVisible(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setIsVisible(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: '120px' }
+    );
+    if (cardContainerRef.current) {
+      observer.observe(cardContainerRef.current);
+    }
+    return () => observer.disconnect();
+  }, [file?.file_id, isImage]);
 
   useEffect(() => {
     function handleClickOutside(e) {
@@ -56,7 +84,7 @@ export default function FileCard({
   // Robust thumbnail loader with cache & loading state
   useEffect(() => {
     let isMounted = true;
-    if (!isImage || !file?.file_id) return;
+    if (!isImage || !file?.file_id || !isVisible) return;
 
     // Check module cache first
     if (thumbnailCache.has(file.file_id)) {
@@ -96,7 +124,7 @@ export default function FileCard({
     return () => {
       isMounted = false;
     };
-  }, [file?.file_id, isImage]);
+  }, [file?.file_id, isImage, isVisible]);
 
   const handleCardClick = (e) => {
     if (menuRef.current && menuRef.current.contains(e.target)) {
@@ -127,6 +155,7 @@ export default function FileCard({
 
   return (
     <div
+      ref={cardContainerRef}
       className={`file-card ${menuOpen ? 'menu-active' : ''} ${isDragging ? 'dragging' : ''}`}
       onClick={handleCardClick}
       role="button"
@@ -137,11 +166,9 @@ export default function FileCard({
       onDragEnd={handleDragEnd}
     >
       <div className="file-card-preview">
-        {/* Loading Spinner / Shimmer for Images */}
+        {/* Shimmer Placeholder for Images */}
         {isImage && thumbnailLoading && (
-          <div className="file-card-loading-placeholder">
-            <Loader size={20} className="spinner" style={{ color: 'var(--primary)' }} />
-          </div>
+          <div className="skeleton-thumbnail-shimmer" />
         )}
 
         {/* Thumbnail Image */}
@@ -394,3 +421,5 @@ export default function FileCard({
     </div>
   );
 }
+
+export default React.memo(FileCard);

@@ -81,8 +81,13 @@ export default function FilePreviewModal({
         setBlobUrl(`${API_BASE}/files/${file.file_id}/download?inline=true${tokenParam}`);
       });
 
+    const safetyTimer = setTimeout(() => {
+      if (isMounted) setImageLoading(false);
+    }, 10000);
+
     return () => {
       isMounted = false;
+      clearTimeout(safetyTimer);
       if (activeBlobUrl) {
         URL.revokeObjectURL(activeBlobUrl);
       }
@@ -368,16 +373,8 @@ export default function FilePreviewModal({
         >
           {imageLoading && (
             <div className="preview-image-loading">
-              <div
-                className="spinner"
-                style={{
-                  width: 36,
-                  height: 36,
-                  borderColor: 'rgba(255,255,255,0.2)',
-                  borderTopColor: 'white',
-                }}
-              />
-              <span>Loading image...</span>
+              <div className="top-sync-indicator" style={{ width: 140, height: 3, borderRadius: 2 }} />
+              <span style={{ marginTop: 8, fontSize: '0.85rem' }}>Loading image...</span>
             </div>
           )}
           {blobUrl && (
@@ -410,16 +407,9 @@ export default function FilePreviewModal({
 
     if (metadataLoading) {
       return (
-        <div style={{ textAlign: 'center', color: 'white' }}>
-          <div
-            className="spinner"
-            style={{
-              margin: '0 auto 16px',
-              borderColor: 'rgba(255,255,255,0.3)',
-              borderTopColor: 'white',
-            }}
-          />
-          <p>Loading preview...</p>
+        <div style={{ textAlign: 'center', color: 'white', padding: 20 }}>
+          <div className="top-sync-indicator" style={{ width: 140, height: 3, margin: '0 auto 16px', borderRadius: 2 }} />
+          <p style={{ fontSize: '0.9rem', color: '#94a3b8' }}>Loading preview...</p>
         </div>
       );
     }

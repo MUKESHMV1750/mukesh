@@ -11,7 +11,13 @@ export function AuthProvider({ children }) {
       return false;
     }
   });
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => {
+    try {
+      return !localStorage.getItem('drivex_admin_token');
+    } catch {
+      return true;
+    }
+  });
 
   useEffect(() => {
     checkAuth();

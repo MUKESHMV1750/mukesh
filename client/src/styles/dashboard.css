@@ -928,3 +928,82 @@
 .sidebar-mobile-header {
   display: none;
 }
+
+/* ═══════ Modern Skeleton & Progress Shimmer (Replaces Ring Spinner) ═══════ */
+.top-sync-indicator {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, #2563eb, #60a5fa, #93c5fd, #2563eb);
+  background-size: 200% 100%;
+  animation: syncShimmer 1.4s infinite linear;
+  z-index: 9999;
+}
+
+@keyframes syncShimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.dashboard-skeleton-wrap {
+  width: 100%;
+  margin-top: 16px;
+}
+
+.skeleton-folders-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+  margin-bottom: 28px;
+}
+
+.skeleton-folder-item {
+  height: 54px;
+  border-radius: 14px;
+  background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+  background-size: 200% 100%;
+  animation: pulseCard 1.4s infinite ease-in-out;
+  border: 1px solid #e2e8f0;
+}
+
+.skeleton-files-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 16px;
+}
+
+.skeleton-file-item {
+  height: 190px;
+  border-radius: 16px;
+  background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+  background-size: 200% 100%;
+  animation: pulseCard 1.4s infinite ease-in-out;
+  border: 1px solid #e2e8f0;
+}
+
+.skeleton-list-item {
+  height: 48px;
+  border-radius: 10px;
+  background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+  background-size: 200% 100%;
+  animation: pulseCard 1.4s infinite ease-in-out;
+  border: 1px solid #e2e8f0;
+  margin-bottom: 8px;
+}
+
+@keyframes pulseCard {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.skeleton-thumbnail-shimmer {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+  background-size: 200% 100%;
+  animation: pulseCard 1.4s infinite ease-in-out;
+}
+
+

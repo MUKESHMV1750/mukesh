@@ -14,8 +14,17 @@ export default function TrashPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [viewMode, setViewMode] = useState('grid');
   const [searchQuery, setSearchQuery] = useState('');
-  const [files, setFiles] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [files, setFiles] = useState(() => {
+    try {
+      const cached = sessionStorage.getItem('drivex_cache_trash');
+      return cached ? JSON.parse(cached) : [];
+    } catch (e) { return []; }
+  });
+  const [loading, setLoading] = useState(() => {
+    try {
+      return !sessionStorage.getItem('drivex_cache_trash');
+    } catch (e) { return true; }
+  });
   const [loadError, setLoadError] = useState(null);
 
   // Dialogs
@@ -23,20 +32,24 @@ export default function TrashPage() {
   const [actionLoading, setActionLoading] = useState(false);
 
   const loadTrash = useCallback(async () => {
-    setLoading(true);
+    if (files.length === 0) setLoading(true);
     setLoadError(null);
+    const timeout = setTimeout(() => setLoading(false), 8000);
     try {
       const res = await fileService.listFiles({ status: 'trashed', is_trashed: 'true', trashed: 'true' });
       if (res.data?.success) {
-        setFiles(res.data.data || []);
+        const data = res.data.data || [];
+        setFiles(data);
+        try { sessionStorage.setItem('drivex_cache_trash', JSON.stringify(data)); } catch (e) {}
       }
     } catch (err) {
       setLoadError(err.response?.data?.message || err.message || 'Failed to load trash items');
-      showToast('Failed to load trash items', 'error');
+      if (files.length === 0) showToast('Failed to load trash items', 'error');
     } finally {
+      clearTimeout(timeout);
       setLoading(false);
     }
-  }, [showToast]);
+  }, [showToast, files.length]);
 
   useEffect(() => {
     loadTrash();
@@ -160,12 +173,15 @@ export default function TrashPage() {
           </div>
         </div>
 
-        {loading ? (
-          <div className="empty-state">
-            <div className="spinner" />
-            <p>Loading trash...</p>
+        {loading && displayedFiles.length === 0 ? (
+          <div className="dashboard-skeleton-wrap">
+            <div className="skeleton-files-grid">
+              {[1, 2, 3, 4, 5, 6].map((n) => (
+                <div key={n} className="skeleton-file-item" />
+              ))}
+            </div>
           </div>
-        ) : loadError ? (
+        ) : loadError && displayedFiles.length === 0 ? (
           <div className="empty-state error-state">
             <AlertCircle size={44} />
             <h3>Unable to load trash</h3>

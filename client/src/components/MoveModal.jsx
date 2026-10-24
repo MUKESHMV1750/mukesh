@@ -71,8 +71,9 @@ export default function MoveModal({ file, isOpen, onClose, onMove }) {
             </p>
 
             {loading ? (
-              <div style={{ textAlign: 'center', padding: 20 }}>
-                <div className="spinner" style={{ margin: '0 auto' }} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '8px 0' }}>
+                <div className="skeleton-file-item" style={{ height: 42, width: '100%' }} />
+                <div className="skeleton-file-item" style={{ height: 42, width: '100%' }} />
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 240, overflowY: 'auto' }}>

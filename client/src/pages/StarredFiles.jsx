@@ -18,8 +18,17 @@ export default function StarredFiles() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [viewMode, setViewMode] = useState('grid');
   const [searchQuery, setSearchQuery] = useState('');
-  const [files, setFiles] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [files, setFiles] = useState(() => {
+    try {
+      const cached = sessionStorage.getItem('drivex_cache_starred');
+      return cached ? JSON.parse(cached) : [];
+    } catch (e) { return []; }
+  });
+  const [loading, setLoading] = useState(() => {
+    try {
+      return !sessionStorage.getItem('drivex_cache_starred');
+    } catch (e) { return true; }
+  });
   const [loadError, setLoadError] = useState(null);
 
   // Modals
@@ -31,20 +40,24 @@ export default function StarredFiles() {
   const [deleteLoading, setDeleteLoading] = useState(false);
 
   const loadStarred = useCallback(async () => {
-    setLoading(true);
+    if (files.length === 0) setLoading(true);
     setLoadError(null);
+    const timeout = setTimeout(() => setLoading(false), 8000);
     try {
       const res = await fileService.listFiles({ is_starred: 'true', status: 'active' });
       if (res.data?.success) {
-        setFiles(res.data.data || []);
+        const data = res.data.data || [];
+        setFiles(data);
+        try { sessionStorage.setItem('drivex_cache_starred', JSON.stringify(data)); } catch (e) {}
       }
     } catch (err) {
       setLoadError(err.response?.data?.message || err.message || 'Failed to load starred files');
-      showToast('Failed to load starred files', 'error');
+      if (files.length === 0) showToast('Failed to load starred files', 'error');
     } finally {
+      clearTimeout(timeout);
       setLoading(false);
     }
-  }, [showToast]);
+  }, [showToast, files.length]);
 
   useEffect(() => {
     loadStarred();
@@ -226,12 +239,15 @@ export default function StarredFiles() {
           </button>
         </div>
 
-        {loading ? (
-          <div className="empty-state">
-            <div className="spinner" />
-            <p>Loading starred files...</p>
+        {loading && displayedFiles.length === 0 ? (
+          <div className="dashboard-skeleton-wrap">
+            <div className="skeleton-files-grid">
+              {[1, 2, 3, 4, 5, 6].map((n) => (
+                <div key={n} className="skeleton-file-item" />
+              ))}
+            </div>
           </div>
-        ) : loadError ? (
+        ) : loadError && displayedFiles.length === 0 ? (
           <div className="empty-state error-state">
             <AlertCircle size={44} />
             <h3>Unable to load starred files</h3>

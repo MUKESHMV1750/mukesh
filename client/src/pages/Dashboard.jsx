@@ -42,10 +42,28 @@ export default function Dashboard() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState('all');
 
-  // Data State
-  const [folders, setFolders] = useState([]);
-  const [files, setFiles] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const cacheKey = `drivex_cache_${currentFolderId || 'root'}`;
+
+  // Data State - Initialize from sessionStorage cache for 0ms instant display
+  const [folders, setFolders] = useState(() => {
+    try {
+      const cached = sessionStorage.getItem(`${cacheKey}_folders`);
+      return cached ? JSON.parse(cached) : [];
+    } catch (e) { return []; }
+  });
+  const [files, setFiles] = useState(() => {
+    try {
+      const cached = sessionStorage.getItem(`${cacheKey}_files`);
+      return cached ? JSON.parse(cached) : [];
+    } catch (e) { return []; }
+  });
+  const [loading, setLoading] = useState(() => {
+    try {
+      const cached = sessionStorage.getItem(`${cacheKey}_files`);
+      return !cached; // If cached, show content immediately without initial blocking
+    } catch (e) { return true; }
+  });
+  const [isSyncing, setIsSyncing] = useState(false);
   const [loadError, setLoadError] = useState(null);
   const [storageInfo, setStorageInfo] = useState(null);
 
@@ -63,8 +81,18 @@ export default function Dashboard() {
 
   // Load content
   const loadData = useCallback(async (showLoading = true) => {
-    if (showLoading) setLoading(true);
+    if (showLoading && files.length === 0 && folders.length === 0) {
+      setLoading(true);
+    }
+    setIsSyncing(true);
     setLoadError(null);
+
+    // Safety timeout: guaranteed reset so loading never gets stuck
+    const safetyTimeout = setTimeout(() => {
+      setLoading(false);
+      setIsSyncing(false);
+    }, 10000);
+
     try {
       const [foldersRes, filesRes, storageRes] = await Promise.all([
         folderService.listFolders(currentFolderId),
@@ -73,21 +101,30 @@ export default function Dashboard() {
       ]);
 
       if (foldersRes.data?.success) {
-        setFolders(foldersRes.data.data || []);
+        const newFolders = foldersRes.data.data || [];
+        setFolders(newFolders);
+        try { sessionStorage.setItem(`${cacheKey}_folders`, JSON.stringify(newFolders)); } catch (e) {}
       }
       if (filesRes.data?.success) {
-        setFiles(filesRes.data.data || []);
+        const newFiles = filesRes.data.data || [];
+        setFiles(newFiles);
+        try { sessionStorage.setItem(`${cacheKey}_files`, JSON.stringify(newFiles)); } catch (e) {}
       }
       if (storageRes.data?.success) {
         setStorageInfo(storageRes.data.data);
       }
     } catch (err) {
-      setLoadError(err.response?.data?.message || err.message || 'Unable to connect to drive storage service');
-      showToast('Failed to load drive items', 'error');
+      const errorText = err.response?.data?.message || err.message || 'Unable to connect to drive storage service';
+      setLoadError(errorText);
+      if (files.length === 0 && folders.length === 0) {
+        showToast('Failed to load drive items', 'error');
+      }
     } finally {
-      if (showLoading) setLoading(false);
+      clearTimeout(safetyTimeout);
+      setLoading(false);
+      setIsSyncing(false);
     }
-  }, [currentFolderId, showToast]);
+  }, [currentFolderId, showToast, cacheKey, files.length, folders.length]);
 
   useEffect(() => {
     loadData(true);
@@ -112,7 +149,49 @@ export default function Dashboard() {
     }
   };
 
-  // Upload handler
+  // Upload single file item with progress
+  const uploadSingleItem = async (item) => {
+    const formData = new FormData();
+    formData.append('files', item.file);
+    if (currentFolderId) {
+      formData.append('folder_id', currentFolderId);
+    }
+
+    try {
+      const uploadRes = await fileService.uploadFiles(formData, (progressEvent) => {
+        const total = progressEvent.total || item.file.size;
+        const percent = Math.round((progressEvent.loaded * 100) / total);
+        setUploads((prev) =>
+          prev.map((u) => (u.id === item.id ? { ...u, progress: percent, loaded: progressEvent.loaded, size: total } : u))
+        );
+      });
+
+      setUploads((prev) =>
+        prev.map((u) => (u.id === item.id ? { ...u, progress: 100, status: 'complete', loaded: item.file.size, size: item.file.size } : u))
+      );
+
+      // DIRECTLY show uploaded files in the UI immediately
+      if (uploadRes.data?.success && uploadRes.data?.data) {
+        const createdFiles = Array.isArray(uploadRes.data.data)
+          ? uploadRes.data.data
+          : [uploadRes.data.data];
+        setFiles((prev) => {
+          const existingIds = new Set(prev.map((f) => f.file_id));
+          const fresh = createdFiles.filter((f) => !existingIds.has(f.file_id));
+          return [...fresh, ...prev];
+        });
+      }
+
+      showToast(`Uploaded "${item.name}"`, 'success');
+    } catch (err) {
+      setUploads((prev) =>
+        prev.map((u) => (u.id === item.id ? { ...u, status: 'error' } : u))
+      );
+      showToast(`Failed to upload "${item.name}"`, 'error');
+    }
+  };
+
+  // Fast concurrent upload handler (up to 3 parallel uploads)
   const handleUploadFiles = async (filesList) => {
     if (!filesList || filesList.length === 0) return;
 
@@ -121,53 +200,35 @@ export default function Dashboard() {
       name: file.name,
       file,
       progress: 0,
+      loaded: 0,
+      size: file.size,
       status: 'uploading',
     }));
 
     setUploads((prev) => [...newUploads, ...prev]);
 
-    for (const item of newUploads) {
-      const formData = new FormData();
-      formData.append('files', item.file);
-      if (currentFolderId) {
-        formData.append('folder_id', currentFolderId);
+    // Worker pool for 3 concurrent parallel uploads
+    const queue = [...newUploads];
+    const MAX_CONCURRENT = 3;
+    const worker = async () => {
+      while (queue.length > 0) {
+        const item = queue.shift();
+        if (item) await uploadSingleItem(item);
       }
+    };
 
-      try {
-        const uploadRes = await fileService.uploadFiles(formData, (progressEvent) => {
-          const total = progressEvent.total || item.file.size;
-          const percent = Math.round((progressEvent.loaded * 100) / total);
-          setUploads((prev) =>
-            prev.map((u) => (u.id === item.id ? { ...u, progress: percent } : u))
-          );
-        });
+    await Promise.all(
+      Array.from({ length: Math.min(MAX_CONCURRENT, newUploads.length) }, () => worker())
+    );
 
-        setUploads((prev) =>
-          prev.map((u) => (u.id === item.id ? { ...u, progress: 100, status: 'complete' } : u))
-        );
+    loadData(false);
+  };
 
-        // DIRECTLY show uploaded files in the UI immediately without any manual reload!
-        if (uploadRes.data?.success && uploadRes.data?.data) {
-          const createdFiles = Array.isArray(uploadRes.data.data)
-            ? uploadRes.data.data
-            : [uploadRes.data.data];
-          setFiles((prev) => {
-            const existingIds = new Set(prev.map((f) => f.file_id));
-            const fresh = createdFiles.filter((f) => !existingIds.has(f.file_id));
-            return [...fresh, ...prev];
-          });
-        }
-
-        showToast(`Uploaded "${item.name}"`, 'success');
-      } catch (err) {
-        setUploads((prev) =>
-          prev.map((u) => (u.id === item.id ? { ...u, status: 'error' } : u))
-        );
-        showToast(`Failed to upload "${item.name}"`, 'error');
-      }
-    }
-
-    // Refresh data in background without showing full-page spinner
+  const handleRetryUpload = async (uploadItem) => {
+    setUploads((prev) =>
+      prev.map((u) => (u.id === uploadItem.id ? { ...u, status: 'uploading', progress: 0 } : u))
+    );
+    await uploadSingleItem(uploadItem);
     loadData(false);
   };
 
@@ -370,6 +431,7 @@ export default function Dashboard() {
       />
 
       <main className="main-content">
+        {isSyncing && <div className="top-sync-indicator" />}
         {/* Modern Admin Page Header */}
         <div className="page-header">
           <div className="page-header-info">
@@ -559,12 +621,21 @@ export default function Dashboard() {
           </button>
         </div>
 
-        {loading ? (
-          <div className="empty-state">
-            <div className="spinner" />
-            <p>Loading files and folders...</p>
+        {/* Replaced circular ring with instant skeleton preview when no cache is present */}
+        {loading && displayedFiles.length === 0 && displayedFolders.length === 0 ? (
+          <div className="dashboard-skeleton-wrap">
+            <div className="skeleton-folders-grid">
+              {[1, 2, 3, 4].map((n) => (
+                <div key={n} className="skeleton-folder-item" />
+              ))}
+            </div>
+            <div className="skeleton-files-grid">
+              {[1, 2, 3, 4, 5, 6].map((n) => (
+                <div key={n} className="skeleton-file-item" />
+              ))}
+            </div>
           </div>
-        ) : loadError ? (
+        ) : loadError && displayedFiles.length === 0 && displayedFolders.length === 0 ? (
           <div className="empty-state error-state">
             <AlertCircle size={44} />
             <h3>Unable to load drive items</h3>
@@ -663,6 +734,7 @@ export default function Dashboard() {
       <UploadProgress
         uploads={uploads}
         onClose={() => setUploads([])}
+        onRetry={handleRetryUpload}
       />
 
       {/* Modals */}

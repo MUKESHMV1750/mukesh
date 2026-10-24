@@ -11,18 +11,33 @@ import { useToast } from '../context/ToastContext';
 export default function StoragePage() {
   const { showToast } = useToast();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [storageData, setStorageData] = useState(() => {
+    try {
+      const cached = sessionStorage.getItem('drivex_cache_storage');
+      return cached ? JSON.parse(cached) : null;
+    } catch (e) { return null; }
+  });
+  const [files, setFiles] = useState(() => {
+    try {
+      const cached = sessionStorage.getItem('drivex_cache_root_files');
+      return cached ? JSON.parse(cached) : [];
+    } catch (e) { return []; }
+  });
+  const [loading, setLoading] = useState(() => {
+    try {
+      return !sessionStorage.getItem('drivex_cache_storage');
+    } catch (e) { return true; }
+  });
   const [loadError, setLoadError] = useState(null);
-  const [storageData, setStorageData] = useState(null);
-  const [files, setFiles] = useState([]);
 
   useEffect(() => {
     loadStorageData();
   }, []);
 
   const loadStorageData = async () => {
-    setLoading(true);
+    if (!storageData && files.length === 0) setLoading(true);
     setLoadError(null);
+    const timeout = setTimeout(() => setLoading(false), 8000);
     try {
       const [storageRes, filesRes] = await Promise.all([
         fileService.getStorageUsage().catch(() => ({ data: { success: false } })),
@@ -31,14 +46,17 @@ export default function StoragePage() {
 
       if (storageRes.data?.success) {
         setStorageData(storageRes.data.data);
+        try { sessionStorage.setItem('drivex_cache_storage', JSON.stringify(storageRes.data.data)); } catch (e) {}
       }
       if (filesRes.data?.success) {
         setFiles(filesRes.data.data || []);
+        try { sessionStorage.setItem('drivex_cache_root_files', JSON.stringify(filesRes.data.data || [])); } catch (e) {}
       }
     } catch (err) {
       setLoadError(err.response?.data?.message || err.message || 'Error loading storage details');
-      showToast('Error loading storage details', 'error');
+      if (!storageData) showToast('Error loading storage details', 'error');
     } finally {
+      clearTimeout(timeout);
       setLoading(false);
     }
   };
@@ -127,12 +145,16 @@ export default function StoragePage() {
           </div>
         </div>
 
-        {loading ? (
-          <div className="empty-state">
-            <div className="spinner" />
-            <p>Analyzing storage usage...</p>
+        {loading && !storageData && files.length === 0 ? (
+          <div className="dashboard-skeleton-wrap">
+            <div className="skeleton-file-item" style={{ height: 160, marginBottom: 20 }} />
+            <div className="skeleton-files-grid">
+              {[1, 2, 3, 4].map((n) => (
+                <div key={n} className="skeleton-file-item" style={{ height: 100 }} />
+              ))}
+            </div>
           </div>
-        ) : loadError ? (
+        ) : loadError && !storageData && files.length === 0 ? (
           <div className="empty-state error-state">
             <AlertCircle size={44} />
             <h3>Unable to load storage overview</h3>

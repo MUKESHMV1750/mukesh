@@ -114,8 +114,8 @@ export default function ShareModal({ file, onClose }) {
           </div>
 
           {loading ? (
-            <div style={{ textAlign: 'center', padding: 20 }}>
-              <div className="spinner" style={{ margin: '0 auto' }} />
+            <div style={{ padding: '12px 0' }}>
+              <div className="skeleton-file-item" style={{ height: 40, width: '100%' }} />
             </div>
           ) : (
             <>
