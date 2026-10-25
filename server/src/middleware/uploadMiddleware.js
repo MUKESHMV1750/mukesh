@@ -4,6 +4,8 @@ const uploadsDir = require('../utils/uploadsDir');
 const { generateId } = require('../utils/generateToken');
 const sanitizeFilename = require('../utils/sanitizeFilename');
 
+const fs = require('fs');
+
 /** 350 MB max per file */
 const MAX_FILE_SIZE = 350 * 1024 * 1024;
 const MAX_FILES = 10;
@@ -11,6 +13,11 @@ const MAX_FILES = 10;
 // Disk storage avoids holding up to 350MB × N files in RAM
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => {
+    if (!fs.existsSync(uploadsDir)) {
+      try {
+        fs.mkdirSync(uploadsDir, { recursive: true });
+      } catch (e) {}
+    }
     cb(null, uploadsDir);
   },
   filename: (_req, file, cb) => {

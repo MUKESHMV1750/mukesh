@@ -57,7 +57,7 @@ export function isPreviewable(mimeType = '', filename = '') {
     return true;
   }
   if (filename && typeof filename === 'string') {
-    return /\.(jpe?g|png|gif|webp|svg|bmp|ico|mp4|webm|ogg|mp3|wav|pdf|txt|csv|json|md|html|css|js)$/i.test(filename);
+    return /\.(jpe?g|png|gif|webp|svg|bmp|ico|mp4|webm|ogg|mp3|wav|pdf|txt|csv|json|md|html|css|js|docx?|xlsx?|pptx?)$/i.test(filename);
   }
   return false;
 }

@@ -8,8 +8,8 @@ const sanitizeFilename = require('../utils/sanitizeFilename');
 
 /** Sheets cells max ~50K chars; keep chunks under that */
 const CHUNK_SIZE = 40000;
-/** Sheets FileData is only viable for small files (base64 bloat + API limits) */
-const SHEETS_MAX_BYTES = 4 * 1024 * 1024;
+/** Sheets FileData fallback supports files up to 25MB */
+const SHEETS_MAX_BYTES = 25 * 1024 * 1024;
 
 function localCachePath(fileId, fileName) {
   return path.join(uploadsDir, `${fileId}_${sanitizeFilename(fileName)}`);
@@ -117,17 +117,17 @@ async function saveFile(fileId, source, fileName, mimeType, targetDriveFolderId 
     // Large files cannot use Sheets — fail clearly rather than create broken records
     if (size > SHEETS_MAX_BYTES) {
       const err = new Error(
-        `Upload to Google Drive failed for a ${Math.round(size / (1024 * 1024))}MB file: ${driveErr.message}. Configure GOOGLE_DRIVE_FOLDER_ID and share the folder with the service account.`
+        `Upload to Google Drive failed for a ${Math.round(size / (1024 * 1024))}MB file: ${driveErr.message}. For files over 25MB, configure GOOGLE_DRIVE_FOLDER_ID and share the folder with the service account.`
       );
       err.statusCode = 502;
       throw err;
     }
   }
 
-  // 2. Sheets FileData fallback (small files only)
+  // 2. Sheets FileData fallback
   if (size > SHEETS_MAX_BYTES) {
     const err = new Error(
-      'File is too large for Sheets fallback storage. Google Drive must be configured for files over 4MB.'
+      'File is too large for Sheets fallback storage. Google Drive must be configured for files over 25MB.'
     );
     err.statusCode = 503;
     throw err;

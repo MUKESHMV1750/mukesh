@@ -98,20 +98,23 @@ async function getMe(req, res, next) {
   try {
     // 1. Check session
     if (req.session && req.session.isAdmin) {
+      const token = generateAdminToken();
       return res.json({
         success: true,
         isAdmin: true,
-        loginAt: req.session.loginAt,
+        token,
+        loginAt: req.session.loginAt || new Date().toISOString(),
       });
     }
 
-    // 2. Check Bearer token / x-admin-token
+    // 2. Check Bearer token / x-admin-token / query token
     const token = extractToken(req);
     if (token && verifyAdminToken(token)) {
       return res.json({
         success: true,
         isAdmin: true,
         tokenValid: true,
+        token,
         loginAt: new Date().toISOString(),
       });
     }

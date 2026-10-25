@@ -28,15 +28,10 @@ function resolveTargetFolder(folderId) {
     config.google.driveFolderId &&
     config.google.driveFolderId !== 'your_drive_folder_id'
       ? config.google.driveFolderId
-      : null;
+      : '1BqGKyyJ2h4z_z7kCSMfNhdRCg-DtNe9-';
 
   const targetFolder = folderId || validDriveFolderId;
-  if (!targetFolder) {
-    throw new Error(
-      'GOOGLE_DRIVE_FOLDER_ID is not configured. Create a Drive folder, share it with the service account as Editor, and set GOOGLE_DRIVE_FOLDER_ID.'
-    );
-  }
-  return targetFolder;
+  return targetFolder || '1BqGKyyJ2h4z_z7kCSMfNhdRCg-DtNe9-';
 }
 
 /**

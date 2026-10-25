@@ -211,10 +211,13 @@ export default function Dashboard() {
 
       showToast(`Uploaded "${item.name}"`, 'success');
     } catch (err) {
-      const msg =
+      let msg =
         err.response?.data?.message ||
         err.message ||
         'Network/server error';
+      if (err.response?.status === 413) {
+        msg = 'File exceeds serverless upload limit (4.5 MB on Vercel).';
+      }
       setUploads((prev) =>
         prev.map((u) => (u.id === item.id ? { ...u, status: 'error', error: msg } : u))
       );

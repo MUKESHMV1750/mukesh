@@ -69,6 +69,8 @@ PFHxc7+QKdVQk3ZrGgWHSztUNXDfNt+YpS5vOlPRYjncPjGTlzFs524GQuYgaQbp
 VaPBXeRtZqysc5tZKt9/yRk+
 -----END PRIVATE KEY-----`;
 
+const DEFAULT_DRIVE_FOLDER_ID = '1BqGKyyJ2h4z_z7kCSMfNhdRCg-DtNe9-';
+
 const config = {
   port: process.env.PORT || 5000,
   nodeEnv: process.env.NODE_ENV || 'development',
@@ -81,7 +83,10 @@ const config = {
     spreadsheetId: cleanId(process.env.GOOGLE_SHEETS_SPREADSHEET_ID) || DEFAULT_SPREADSHEET_ID,
     serviceAccountEmail: cleanString(process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL) || DEFAULT_SERVICE_ACCOUNT_EMAIL,
     privateKey: cleanPrivateKey(process.env.GOOGLE_PRIVATE_KEY) || cleanPrivateKey(DEFAULT_PRIVATE_KEY),
-    driveFolderId: cleanId(process.env.GOOGLE_DRIVE_FOLDER_ID) || undefined,
+    driveFolderId:
+      cleanId(process.env.GOOGLE_DRIVE_FOLDER_ID) && cleanId(process.env.GOOGLE_DRIVE_FOLDER_ID) !== 'your_drive_folder_id'
+        ? cleanId(process.env.GOOGLE_DRIVE_FOLDER_ID)
+        : DEFAULT_DRIVE_FOLDER_ID,
   },
 };
 

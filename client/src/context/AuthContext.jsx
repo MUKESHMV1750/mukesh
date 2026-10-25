@@ -35,6 +35,11 @@ export function AuthProvider({ children }) {
     try {
       const res = await authService.getMe();
       if (res.data?.isAdmin === true) {
+        if (res.data.token) {
+          try {
+            localStorage.setItem('drivex_admin_token', res.data.token);
+          } catch (e) {}
+        }
         setIsAuthenticated(true);
       } else if (!hasToken) {
         setIsAuthenticated(false);
