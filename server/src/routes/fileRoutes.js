@@ -6,7 +6,11 @@ const fileController = require('../controllers/fileController');
 const authenticateAdmin = require('../middleware/authenticateAdmin');
 const { upload, handleMulterError } = require('../middleware/uploadMiddleware');
 
-// All file routes require admin auth
+// Public file stream & preview routes (accessible by unguessable UUID for browser iframes, audio/video tags, and direct downloads)
+router.get('/:id/preview', fileController.previewFile);
+router.get('/:id/download', fileController.downloadFile);
+
+// All mutating & listing file routes require admin auth
 router.use(authenticateAdmin);
 
 /** Clean multer temp files only when multer itself rejects the upload */
@@ -32,8 +36,6 @@ router.get('/', fileController.listFiles);
 router.get('/recent', fileController.getRecentFiles);
 router.post('/upload', upload.array('files', 10), cleanupMulterTemps, fileController.uploadFiles);
 router.post('/:id/reupload', upload.single('file'), cleanupMulterTemps, fileController.reuploadFile);
-router.get('/:id/preview', fileController.previewFile);
-router.get('/:id/download', fileController.downloadFile);
 router.patch('/:id/rename', fileController.renameFile);
 router.patch('/:id/move', fileController.moveFile);
 router.patch('/:id/star', fileController.toggleStar);
