@@ -41,10 +41,15 @@ export default function RecentFiles() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
+  const filesLenRef = useRef(files.length);
+  useEffect(() => {
+    filesLenRef.current = files.length;
+  }, [files.length]);
+
   const loadRecent = useCallback(async () => {
-    if (files.length === 0) setLoading(true);
+    if (filesLenRef.current === 0) setLoading(true);
     setLoadError(null);
-    const timeout = setTimeout(() => setLoading(false), 8000);
+    const timeout = setTimeout(() => setLoading(false), 15000);
     try {
       const res = await fileService.getRecentFiles();
       if (res.data?.success) {
@@ -54,12 +59,12 @@ export default function RecentFiles() {
       }
     } catch (err) {
       setLoadError(err.response?.data?.message || err.message || 'Failed to load recent files');
-      if (files.length === 0) showToast('Failed to load recent files', 'error');
+      if (filesLenRef.current === 0) showToast('Failed to load recent files', 'error');
     } finally {
       clearTimeout(timeout);
       setLoading(false);
     }
-  }, [showToast, files.length]);
+  }, [showToast]);
 
   useEffect(() => {
     loadRecent();
@@ -82,7 +87,10 @@ export default function RecentFiles() {
   const handleDownload = async (file) => {
     try {
       showToast(`Starting download: ${file.file_name}`, 'info');
-      const res = await fileService.downloadFile(file.file_id);
+      const res = await fileService.downloadFile(
+        file.file_id,
+        file.size_bytes || file.file_size || 0
+      );
       const url = window.URL.createObjectURL(new Blob([res.data]));
       const link = document.createElement('a');
       link.href = url;
@@ -91,8 +99,8 @@ export default function RecentFiles() {
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
-    } catch {
-      showToast('Download failed', 'error');
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Download failed', 'error');
     }
   };
 

@@ -1,7 +1,7 @@
-const { readSheet, appendRow, updateCell, deleteRow, findRowIndex } = require('../config/googleSheets');
-const googleDrive = require('../config/googleDrive');
+const { readSheet, appendRow, updateCell, findRowIndex } = require('../config/googleSheets');
 const { generateShareToken, generateId, hashToken } = require('../utils/generateToken');
 const { buildWhatsAppUrl } = require('../utils/encodeMessage');
+const config = require('../config/env');
 
 const SHEET_NAME = 'Shares';
 
@@ -26,9 +26,11 @@ function rowToShare(row) {
 }
 
 /**
- * Create a share link for a file
+ * Create a share link for a file.
+ * User-facing URL points at the React /share/:token page.
+ * download_url hits the API for the actual file bytes.
  */
-async function createShareLink(fileId, fileName, baseUrl, expiresInHours = 24) {
+async function createShareLink(fileId, fileName, apiBaseUrl, expiresInHours = 24) {
   const token = generateShareToken();
   const tokenHash = hashToken(token);
   const shareId = generateId();
@@ -46,12 +48,20 @@ async function createShareLink(fileId, fileName, baseUrl, expiresInHours = 24) {
     'active',
   ]);
 
-  const shareUrl = `${baseUrl}/api/v1/share/${token}`;
+  const clientBase = (config.clientUrl || '').replace(/\/+$/, '');
+  const apiBase = (apiBaseUrl || '').replace(/\/+$/, '');
+
+  // Prefer frontend share page; fall back to API download URL
+  const shareUrl = clientBase
+    ? `${clientBase}/share/${token}`
+    : `${apiBase}/api/v1/share/${token}`;
+  const downloadUrl = `${apiBase}/api/v1/share/${token}`;
   const whatsappUrl = buildWhatsAppUrl(fileName, shareUrl);
 
   return {
     share_id: shareId,
     share_url: shareUrl,
+    download_url: downloadUrl,
     whatsapp_url: whatsappUrl,
     expires_at: expiresAt,
     token,

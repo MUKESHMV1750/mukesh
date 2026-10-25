@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { LayoutGrid, List, Star, Inbox, AlertCircle, RefreshCw } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import Sidebar from '../components/Sidebar';
@@ -39,10 +39,15 @@ export default function StarredFiles() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
+  const filesLenRef = useRef(files.length);
+  useEffect(() => {
+    filesLenRef.current = files.length;
+  }, [files.length]);
+
   const loadStarred = useCallback(async () => {
-    if (files.length === 0) setLoading(true);
+    if (filesLenRef.current === 0) setLoading(true);
     setLoadError(null);
-    const timeout = setTimeout(() => setLoading(false), 8000);
+    const timeout = setTimeout(() => setLoading(false), 15000);
     try {
       const res = await fileService.listFiles({ is_starred: 'true', status: 'active' });
       if (res.data?.success) {
@@ -52,12 +57,12 @@ export default function StarredFiles() {
       }
     } catch (err) {
       setLoadError(err.response?.data?.message || err.message || 'Failed to load starred files');
-      if (files.length === 0) showToast('Failed to load starred files', 'error');
+      if (filesLenRef.current === 0) showToast('Failed to load starred files', 'error');
     } finally {
       clearTimeout(timeout);
       setLoading(false);
     }
-  }, [showToast, files.length]);
+  }, [showToast]);
 
   useEffect(() => {
     loadStarred();
@@ -76,7 +81,10 @@ export default function StarredFiles() {
   const handleDownload = async (file) => {
     try {
       showToast(`Starting download: ${file.file_name}`, 'info');
-      const res = await fileService.downloadFile(file.file_id);
+      const res = await fileService.downloadFile(
+        file.file_id,
+        file.size_bytes || file.file_size || 0
+      );
       const url = window.URL.createObjectURL(new Blob([res.data]));
       const link = document.createElement('a');
       link.href = url;
@@ -85,8 +93,8 @@ export default function StarredFiles() {
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
-    } catch {
-      showToast('Download failed', 'error');
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Download failed', 'error');
     }
   };
 

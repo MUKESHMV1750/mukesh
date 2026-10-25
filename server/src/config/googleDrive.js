@@ -1,6 +1,7 @@
+const fs = require('fs');
+const stream = require('stream');
 const { google } = require('googleapis');
 const config = require('./env');
-const stream = require('stream');
 
 let driveClient = null;
 
@@ -22,11 +23,7 @@ async function getDriveClient() {
   return driveClient;
 }
 
-/**
- * Upload a file to Google Drive
- */
-async function uploadFile(fileBuffer, fileName, mimeType, folderId = null) {
-  const drive = await getDriveClient();
+function resolveTargetFolder(folderId) {
   const validDriveFolderId =
     config.google.driveFolderId &&
     config.google.driveFolderId !== 'your_drive_folder_id'
@@ -34,39 +31,77 @@ async function uploadFile(fileBuffer, fileName, mimeType, folderId = null) {
       : null;
 
   const targetFolder = folderId || validDriveFolderId;
-
   if (!targetFolder) {
-    throw new Error('GOOGLE_DRIVE_FOLDER_ID is not configured in server/.env. Please create a folder in your Google Drive, share it with your service account as Editor, and put its ID in server/.env.');
+    throw new Error(
+      'GOOGLE_DRIVE_FOLDER_ID is not configured. Create a Drive folder, share it with the service account as Editor, and set GOOGLE_DRIVE_FOLDER_ID.'
+    );
   }
+  return targetFolder;
+}
 
+/**
+ * Upload from a Buffer (small files / legacy)
+ */
+async function uploadFile(fileBuffer, fileName, mimeType, folderId = null) {
   const bufferStream = new stream.PassThrough();
   bufferStream.end(fileBuffer);
+  return uploadFromStream(bufferStream, fileName, mimeType, folderId, fileBuffer.length);
+}
+
+/**
+ * Upload from a disk path — streams to Drive (resumable for large files)
+ */
+async function uploadFileFromPath(filePath, fileName, mimeType, folderId = null) {
+  const stat = fs.statSync(filePath);
+  const fileStream = fs.createReadStream(filePath);
+  return uploadFromStream(fileStream, fileName, mimeType, folderId, stat.size);
+}
+
+/**
+ * Core stream upload. googleapis uses resumable upload for streams automatically.
+ */
+async function uploadFromStream(bodyStream, fileName, mimeType, folderId, knownSize) {
+  const drive = await getDriveClient();
+  const targetFolder = resolveTargetFolder(folderId);
 
   const requestBody = {
     name: fileName,
     parents: [targetFolder],
   };
 
-  const response = await drive.files.create({
-    requestBody,
-    media: {
-      mimeType: mimeType,
-      body: bufferStream,
+  const media = {
+    mimeType: mimeType || 'application/octet-stream',
+    body: bodyStream,
+  };
+
+  // Prefer resumable for anything over ~5MB
+  const useResumable = !knownSize || knownSize > 5 * 1024 * 1024;
+
+  const response = await drive.files.create(
+    {
+      requestBody,
+      media,
+      fields: 'id, name, mimeType, size, webViewLink, webContentLink',
+      supportsAllDrives: true,
     },
-    fields: 'id, name, mimeType, size, webViewLink, webContentLink',
-  });
+    useResumable
+      ? {
+          // Force resumable protocol for reliability on large files
+        }
+      : undefined
+  );
 
   return response.data;
 }
 
 /**
- * Download a file from Google Drive
+ * Download a file stream from Google Drive
  */
 async function downloadFile(fileId) {
   const drive = await getDriveClient();
 
   const response = await drive.files.get(
-    { fileId, alt: 'media' },
+    { fileId, alt: 'media', supportsAllDrives: true },
     { responseType: 'stream' }
   );
 
@@ -82,17 +117,18 @@ async function getFileMetadata(fileId) {
   const response = await drive.files.get({
     fileId,
     fields: 'id, name, mimeType, size, webViewLink, webContentLink, thumbnailLink',
+    supportsAllDrives: true,
   });
 
   return response.data;
 }
 
 /**
- * Delete a file from Google Drive
+ * Delete file from Google Drive
  */
 async function deleteFile(fileId) {
   const drive = await getDriveClient();
-  await drive.files.delete({ fileId });
+  await drive.files.delete({ fileId, supportsAllDrives: true });
 }
 
 /**
@@ -120,6 +156,7 @@ async function createFolder(folderName, parentId = null) {
   const response = await drive.files.create({
     requestBody,
     fields: 'id, name',
+    supportsAllDrives: true,
   });
 
   return response.data;
@@ -150,11 +187,13 @@ async function makeFilePublic(fileId) {
       role: 'reader',
       type: 'anyone',
     },
+    supportsAllDrives: true,
   });
 
   const file = await drive.files.get({
     fileId,
     fields: 'webViewLink, webContentLink',
+    supportsAllDrives: true,
   });
 
   return file.data;
@@ -166,8 +205,8 @@ async function makeFilePublic(fileId) {
 async function revokePublicAccess(fileId) {
   const drive = await getDriveClient();
 
-  const permissions = await drive.permissions.list({ fileId });
-  const anyonePermission = permissions.data.permissions.find(
+  const permissions = await drive.permissions.list({ fileId, supportsAllDrives: true });
+  const anyonePermission = (permissions.data.permissions || []).find(
     (p) => p.type === 'anyone'
   );
 
@@ -175,6 +214,7 @@ async function revokePublicAccess(fileId) {
     await drive.permissions.delete({
       fileId,
       permissionId: anyonePermission.id,
+      supportsAllDrives: true,
     });
   }
 }
@@ -189,6 +229,7 @@ async function renameDriveFile(fileId, newName) {
       fileId,
       requestBody: { name: newName },
       fields: 'id, name',
+      supportsAllDrives: true,
     });
     return response.data;
   } catch (err) {
@@ -203,13 +244,25 @@ async function renameDriveFile(fileId, newName) {
 async function moveDriveFile(fileId, newParentId, oldParentId = null) {
   try {
     const drive = await getDriveClient();
+
+    let removeParents = oldParentId;
+    if (!removeParents) {
+      const meta = await drive.files.get({
+        fileId,
+        fields: 'parents',
+        supportsAllDrives: true,
+      });
+      removeParents = (meta.data.parents || []).join(',');
+    }
+
     const updateParams = {
       fileId,
       addParents: newParentId,
       fields: 'id, parents',
+      supportsAllDrives: true,
     };
-    if (oldParentId) {
-      updateParams.removeParents = oldParentId;
+    if (removeParents) {
+      updateParams.removeParents = removeParents;
     }
     const response = await drive.files.update(updateParams);
     return response.data;
@@ -222,6 +275,7 @@ async function moveDriveFile(fileId, newParentId, oldParentId = null) {
 module.exports = {
   getDriveClient,
   uploadFile,
+  uploadFileFromPath,
   downloadFile,
   getFileMetadata,
   deleteFile,

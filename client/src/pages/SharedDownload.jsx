@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { Download, FileText, CheckCircle2, ShieldCheck, Lock, ExternalLink } from 'lucide-react';
+import { Download, FileText, CheckCircle2, ShieldCheck, Lock, ExternalLink, AlertCircle } from 'lucide-react';
 import DriveXLogo from '../components/DriveXLogo';
 import { API_BASE_URL } from '../services/api';
 
@@ -8,13 +8,24 @@ export default function SharedDownload() {
   const { token } = useParams();
   const [downloadStarted, setDownloadStarted] = useState(false);
   const [downloadUrl, setDownloadUrl] = useState('');
+  const [error, setError] = useState('');
 
   useEffect(() => {
+    if (!token) {
+      setError('Invalid share link');
+      return;
+    }
     setDownloadUrl(`${API_BASE_URL}/share/${token}`);
   }, [token]);
 
   const handleDownload = () => {
+    if (!downloadUrl) {
+      setError('Download link is not ready');
+      return;
+    }
+    setError('');
     setDownloadStarted(true);
+    // Navigate so the browser handles Content-Disposition attachment
     window.location.href = downloadUrl;
   };
 
@@ -45,7 +56,6 @@ export default function SharedDownload() {
           zIndex: 10,
         }}
       >
-        {/* DriveX Emblem */}
         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 20 }}>
           <DriveXLogo size="lg" />
         </div>
@@ -59,10 +69,9 @@ export default function SharedDownload() {
           Shared Cloud File
         </h2>
         <p style={{ fontSize: '0.875rem', color: '#64748b', marginTop: 6, lineHeight: 1.5 }}>
-          A private file has been securely shared with you via DriveX Google Cloud storage.
+          A private file has been securely shared with you via DriveX. Files up to 350 MB download directly from cloud storage.
         </p>
 
-        {/* File Preview Card */}
         <div
           style={{
             background: '#f8fafc',
@@ -94,14 +103,36 @@ export default function SharedDownload() {
             Ready to Download
           </h3>
           <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: 0 }}>
-            Protected token • Fast direct download from cloud storage
+            Protected token · Fast direct download from cloud storage
           </p>
         </div>
 
-        {/* Action Button */}
+        {error && (
+          <div
+            style={{
+              marginBottom: 16,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
+              color: '#b91c1c',
+              fontSize: '0.8125rem',
+              fontWeight: 600,
+              padding: '10px 14px',
+              background: '#fef2f2',
+              borderRadius: '12px',
+              border: '1px solid #fecaca',
+            }}
+          >
+            <AlertCircle size={16} />
+            <span>{error}</span>
+          </div>
+        )}
+
         <button
           className="btn btn-primary"
           onClick={handleDownload}
+          disabled={!downloadUrl}
           style={{
             width: '100%',
             height: '48px',
@@ -132,15 +163,14 @@ export default function SharedDownload() {
             }}
           >
             <CheckCircle2 size={16} />
-            <span>Download initiated! If it didn't start automatically, click button again.</span>
+            <span>Download initiated! If it didn't start, click the button again.</span>
           </div>
         )}
 
-        {/* Footer info */}
         <div style={{ marginTop: 28, paddingTop: 16, borderTop: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.75rem', color: '#94a3b8' }}>
             <Lock size={12} />
-            <span>End-to-end encrypted</span>
+            <span>Secure share link</span>
           </div>
           <Link
             to="/login"

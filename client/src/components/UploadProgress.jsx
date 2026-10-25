@@ -88,7 +88,13 @@ export default function UploadProgress({ uploads = [], onClose, onRetry }) {
 
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontSize: '0.7rem', color: 'var(--text-tertiary)' }}>
                   <span>{formatFileSize(loadedBytes)} of {formatFileSize(fileSize)}</span>
-                  <span>{isComplete ? 'Saved' : isError ? 'Network/server error' : 'Uploading...'}</span>
+                  <span>
+                    {isComplete
+                      ? 'Saved'
+                      : isError
+                        ? (upload.error || 'Network/server error')
+                        : 'Uploading...'}
+                  </span>
                 </div>
               </div>
             </div>

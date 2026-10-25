@@ -2,15 +2,23 @@ const googleDrive = require('../config/googleDrive');
 
 /**
  * Upload file to Google Drive and return metadata
+ * Accepts Buffer or absolute disk path (preferred for large files)
  */
-async function uploadToDrive(fileBuffer, fileName, mimeType, driveFolderId) {
-  const result = await googleDrive.uploadFile(
-    fileBuffer,
+async function uploadToDrive(source, fileName, mimeType, driveFolderId) {
+  if (typeof source === 'string') {
+    return googleDrive.uploadFileFromPath(
+      source,
+      fileName,
+      mimeType,
+      driveFolderId || undefined
+    );
+  }
+  return googleDrive.uploadFile(
+    source,
     fileName,
     mimeType,
     driveFolderId || undefined
   );
-  return result;
 }
 
 /**

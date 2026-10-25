@@ -60,7 +60,7 @@ export default function UploadZone({ onFilesSelected }) {
           Drop files to upload, or <span className="upload-browse-highlight">browse computer</span>
         </h3>
         <p className="upload-zone-subtitle">
-          Direct cloud storage backed by Google Drive & synced with Google Sheets
+          Up to 350 MB per file · Google Drive storage · Google Sheets metadata
         </p>
 
         {/* Index page inspired file type chips */}

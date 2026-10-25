@@ -1,29 +1,48 @@
 const multer = require('multer');
 const AppError = require('../utils/AppError');
+const uploadsDir = require('../utils/uploadsDir');
+const { generateId } = require('../utils/generateToken');
+const sanitizeFilename = require('../utils/sanitizeFilename');
 
-// Store files in memory for streaming to Google Drive
-const storage = multer.memoryStorage();
+/** 350 MB max per file */
+const MAX_FILE_SIZE = 350 * 1024 * 1024;
+const MAX_FILES = 10;
 
-// 100MB max file size
-const MAX_FILE_SIZE = 100 * 1024 * 1024;
+// Disk storage avoids holding up to 350MB × N files in RAM
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    cb(null, uploadsDir);
+  },
+  filename: (_req, file, cb) => {
+    const safe = sanitizeFilename(file.originalname);
+    cb(null, `tmp_${Date.now()}_${generateId()}_${safe}`);
+  },
+});
 
 const upload = multer({
   storage,
   limits: {
     fileSize: MAX_FILE_SIZE,
-    files: 10, // max 10 files at once
+    files: MAX_FILES,
   },
-  fileFilter: (req, file, cb) => {
-    // Allow all file types — validation can be extended here
+  fileFilter: (_req, file, cb) => {
+    // Preserve original name (UTF-8) for metadata; multer may latin1-decode
+    try {
+      if (file.originalname) {
+        file.originalname = Buffer.from(file.originalname, 'latin1').toString('utf8');
+      }
+    } catch (e) {
+      // keep original
+    }
+    file.originalname = sanitizeFilename(file.originalname);
     cb(null, true);
   },
 });
 
-// Error handling wrapper
 function handleMulterError(err, req, res, next) {
   if (err instanceof multer.MulterError) {
     if (err.code === 'LIMIT_FILE_SIZE') {
-      return next(new AppError('File too large. Maximum size is 100MB.', 413));
+      return next(new AppError('File too large. Maximum size is 350MB.', 413));
     }
     if (err.code === 'LIMIT_FILE_COUNT') {
       return next(new AppError('Too many files. Maximum is 10 at once.', 400));
@@ -33,4 +52,8 @@ function handleMulterError(err, req, res, next) {
   next(err);
 }
 
-module.exports = { upload, handleMulterError };
+module.exports = {
+  upload,
+  handleMulterError,
+  MAX_FILE_SIZE,
+};

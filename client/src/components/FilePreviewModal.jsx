@@ -2,8 +2,9 @@ import React, { useEffect, useState, useRef } from 'react';
 import {
   X, Download, Share2, FileQuestion, ZoomIn, ZoomOut, RotateCcw, AlertCircle, Upload, RefreshCw
 } from 'lucide-react';
-import api from '../services/api';
+import api, { transferTimeoutMs, MAX_UPLOAD_BYTES } from '../services/api';
 import fileService from '../services/fileService';
+import { formatFileSize } from '../utils/formatFileSize';
 
 export default function FilePreviewModal({
   file,
@@ -49,13 +50,27 @@ export default function FilePreviewModal({
     setImageLoading(true);
     setImageError(false);
     setImageErrorMessage('');
+    setBlobUrl((prev) => {
+      if (prev && prev.startsWith('blob:')) URL.revokeObjectURL(prev);
+      return null;
+    });
 
     let activeBlobUrl = null;
+    const size = Number(file.size_bytes || file.file_size || 0);
 
     api
-      .get(`/files/${file.file_id}/download?inline=true`, { responseType: 'blob' })
+      .get(`/files/${file.file_id}/download?inline=true`, {
+        responseType: 'blob',
+        timeout: transferTimeoutMs(size || MAX_UPLOAD_BYTES),
+      })
       .then((res) => {
         if (!isMounted) return;
+        if (res.data?.type && String(res.data.type).includes('application/json')) {
+          setImageLoading(false);
+          setImageError(true);
+          setImageErrorMessage('Image content is missing. Please re-upload.');
+          return;
+        }
         activeBlobUrl = URL.createObjectURL(res.data);
         setBlobUrl(activeBlobUrl);
         setImageLoading(false);
@@ -65,12 +80,14 @@ export default function FilePreviewModal({
         if (!isMounted) return;
         console.warn('Blob fetch failed:', err.message);
         const is404 = err.response?.status === 404;
-        if (is404) {
+        if (is404 || err.code === 'ECONNABORTED') {
           setImageLoading(false);
           setImageError(true);
           setImageErrorMessage(
-            err.response?.data?.message ||
-            'The content for this image was stored in temporary cloud storage and has expired. Please re-upload below.'
+            err.code === 'ECONNABORTED'
+              ? `Timed out loading this ${formatFileSize(size)} image. Try downloading instead.`
+              : err.response?.data?.message ||
+                'Image content is missing from storage. Please re-upload below.'
           );
           return;
         }
@@ -79,11 +96,12 @@ export default function FilePreviewModal({
         const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
         const API_BASE = api.defaults.baseURL || '/api/v1';
         setBlobUrl(`${API_BASE}/files/${file.file_id}/download?inline=true${tokenParam}`);
+        setImageLoading(false);
       });
 
     const safetyTimer = setTimeout(() => {
       if (isMounted) setImageLoading(false);
-    }, 10000);
+    }, Math.min(transferTimeoutMs(size || 0), 120000));
 
     return () => {
       isMounted = false;
@@ -92,7 +110,7 @@ export default function FilePreviewModal({
         URL.revokeObjectURL(activeBlobUrl);
       }
     };
-  }, [file?.file_id, isImage]);
+  }, [file?.file_id, file?.size_bytes, file?.file_size, isImage]);
 
   // Load metadata for non-images
   useEffect(() => {
@@ -247,22 +265,30 @@ export default function FilePreviewModal({
     if (onDownload) {
       onDownload(file);
     } else {
-      fileService.downloadFile(file.file_id).then((res) => {
-        const url = URL.createObjectURL(res.data);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = file.file_name;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      });
+      fileService
+        .downloadFile(file.file_id, file.size_bytes || file.file_size || 0)
+        .then((res) => {
+          const url = URL.createObjectURL(res.data);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = file.file_name;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        })
+        .catch(() => {});
     }
   };
 
   const handleReupload = async (e) => {
     const selectedFile = e.target.files?.[0];
     if (!selectedFile) return;
+
+    if (selectedFile.size > MAX_UPLOAD_BYTES) {
+      setReuploadError(`File exceeds ${formatFileSize(MAX_UPLOAD_BYTES)} limit`);
+      return;
+    }
 
     setIsReuploading(true);
     setReuploadError(null);
@@ -271,14 +297,22 @@ export default function FilePreviewModal({
     formData.append('file', selectedFile);
 
     try {
-      const res = await fileService.reuploadFile(file.file_id, formData);
+      const res = await fileService.reuploadFile(
+        file.file_id,
+        formData,
+        undefined,
+        selectedFile.size
+      );
       if (res.data?.success) {
-        // Load new blob
         const blobRes = await api.get(`/files/${file.file_id}/download?inline=true`, {
           responseType: 'blob',
+          timeout: transferTimeoutMs(selectedFile.size),
         });
         const newBlobUrl = URL.createObjectURL(blobRes.data);
-        setBlobUrl(newBlobUrl);
+        setBlobUrl((prev) => {
+          if (prev && prev.startsWith('blob:')) URL.revokeObjectURL(prev);
+          return newBlobUrl;
+        });
         setImageError(false);
         setImageLoading(false);
         if (onFileUpdated && res.data.data) {

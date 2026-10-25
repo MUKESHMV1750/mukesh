@@ -4,12 +4,14 @@ import {
   Edit2, FolderInput, Trash2, RotateCcw, AlertOctagon,
   Loader
 } from 'lucide-react';
-import api, { API_BASE_URL } from '../services/api';
+import api, { API_BASE_URL, transferTimeoutMs } from '../services/api';
 import { getFileIcon } from '../utils/fileIcons';
 import { formatFileSize, formatDate, isPreviewable } from '../utils/formatFileSize';
 
 // Module-level thumbnail cache to preserve object URLs across re-renders & prevent memory churn
 const thumbnailCache = new Map();
+/** Skip full-file thumbnail fetch for very large images (prevents hangs) */
+const THUMB_MAX_BYTES = 12 * 1024 * 1024;
 
 function FileCard({
   file,
@@ -94,13 +96,37 @@ function FileCard({
       return;
     }
 
+    const size = Number(file.size_bytes || file.file_size || 0);
+    // Very large images: show icon instead of downloading the whole file for a thumb
+    if (size > THUMB_MAX_BYTES) {
+      setThumbnailLoading(false);
+      setThumbnailError(false);
+      setThumbnailUrl(null);
+      return;
+    }
+
     setThumbnailLoading(true);
     setThumbnailError(false);
 
+    const safety = setTimeout(() => {
+      if (isMounted) {
+        setThumbnailLoading(false);
+      }
+    }, 15000);
+
     api
-      .get(`/files/${file.file_id}/download?inline=true`, { responseType: 'blob' })
+      .get(`/files/${file.file_id}/download?inline=true`, {
+        responseType: 'blob',
+        timeout: transferTimeoutMs(size || 2 * 1024 * 1024),
+      })
       .then((res) => {
         if (!isMounted) return;
+        // Reject JSON error bodies masquerading as blobs
+        if (res.data?.type && String(res.data.type).includes('application/json')) {
+          setThumbnailError(true);
+          setThumbnailLoading(false);
+          return;
+        }
         const objectUrl = URL.createObjectURL(res.data);
         thumbnailCache.set(file.file_id, objectUrl);
         setThumbnailUrl(objectUrl);
@@ -108,7 +134,7 @@ function FileCard({
       })
       .catch((err) => {
         if (!isMounted) return;
-        if (err.response?.status === 404) {
+        if (err.response?.status === 404 || err.code === 'ECONNABORTED') {
           setThumbnailError(true);
           setThumbnailLoading(false);
           return;
@@ -123,8 +149,9 @@ function FileCard({
 
     return () => {
       isMounted = false;
+      clearTimeout(safety);
     };
-  }, [file?.file_id, isImage, isVisible]);
+  }, [file?.file_id, file?.size_bytes, file?.file_size, isImage, isVisible]);
 
   const handleCardClick = (e) => {
     if (menuRef.current && menuRef.current.contains(e.target)) {

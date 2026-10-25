@@ -29,10 +29,21 @@ function resolveBaseUrl() {
 export const API_BASE_URL = resolveBaseUrl();
 const API_URL = API_BASE_URL;
 
+/** Max file size aligned with server (350 MB) */
+export const MAX_UPLOAD_BYTES = 350 * 1024 * 1024;
+
+/**
+ * Timeout for large transfers: 10 min base + 2s per MB, capped at 45 min
+ */
+export function transferTimeoutMs(bytes = 0) {
+  const mb = Math.max(0, Number(bytes) || 0) / (1024 * 1024);
+  return Math.min(45 * 60 * 1000, 10 * 60 * 1000 + Math.ceil(mb) * 2000);
+}
+
 const api = axios.create({
   baseURL: API_URL,
   withCredentials: true,
-  timeout: 25000, // 25 seconds timeout to avoid infinite hanging requests
+  timeout: 60000, // default 60s for normal API calls (list/rename/etc.)
   headers: {
     'Content-Type': 'application/json',
   },

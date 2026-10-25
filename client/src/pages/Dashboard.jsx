@@ -24,6 +24,8 @@ import BottomNav from '../components/BottomNav';
 import fileService from '../services/fileService';
 import folderService from '../services/folderService';
 import { useToast } from '../context/ToastContext';
+import { MAX_UPLOAD_BYTES, API_BASE_URL } from '../services/api';
+import { formatFileSize } from '../utils/formatFileSize';
 
 export default function Dashboard() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -79,9 +81,17 @@ export default function Dashboard() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
+  // Track emptiness without putting length into loadData deps (prevents reload loops)
+  const filesLenRef = useRef(files.length);
+  const foldersLenRef = useRef(folders.length);
+  useEffect(() => {
+    filesLenRef.current = files.length;
+    foldersLenRef.current = folders.length;
+  }, [files.length, folders.length]);
+
   // Load content
   const loadData = useCallback(async (showLoading = true) => {
-    if (showLoading && files.length === 0 && folders.length === 0) {
+    if (showLoading && filesLenRef.current === 0 && foldersLenRef.current === 0) {
       setLoading(true);
     }
     setIsSyncing(true);
@@ -91,7 +101,7 @@ export default function Dashboard() {
     const safetyTimeout = setTimeout(() => {
       setLoading(false);
       setIsSyncing(false);
-    }, 10000);
+    }, 20000);
 
     try {
       const [foldersRes, filesRes, storageRes] = await Promise.all([
@@ -116,7 +126,7 @@ export default function Dashboard() {
     } catch (err) {
       const errorText = err.response?.data?.message || err.message || 'Unable to connect to drive storage service';
       setLoadError(errorText);
-      if (files.length === 0 && folders.length === 0) {
+      if (filesLenRef.current === 0 && foldersLenRef.current === 0) {
         showToast('Failed to load drive items', 'error');
       }
     } finally {
@@ -124,7 +134,7 @@ export default function Dashboard() {
       setLoading(false);
       setIsSyncing(false);
     }
-  }, [currentFolderId, showToast, cacheKey, files.length, folders.length]);
+  }, [currentFolderId, showToast, cacheKey]);
 
   useEffect(() => {
     loadData(true);
@@ -158,45 +168,83 @@ export default function Dashboard() {
     }
 
     try {
-      const uploadRes = await fileService.uploadFiles(formData, (progressEvent) => {
-        const total = progressEvent.total || item.file.size;
-        const percent = Math.round((progressEvent.loaded * 100) / total);
-        setUploads((prev) =>
-          prev.map((u) => (u.id === item.id ? { ...u, progress: percent, loaded: progressEvent.loaded, size: total } : u))
-        );
-      });
-
-      setUploads((prev) =>
-        prev.map((u) => (u.id === item.id ? { ...u, progress: 100, status: 'complete', loaded: item.file.size, size: item.file.size } : u))
+      const uploadRes = await fileService.uploadFiles(
+        formData,
+        (progressEvent) => {
+          const total = progressEvent.total || item.file.size;
+          const percent = total ? Math.round((progressEvent.loaded * 100) / total) : 0;
+          setUploads((prev) =>
+            prev.map((u) =>
+              u.id === item.id
+                ? { ...u, progress: percent, loaded: progressEvent.loaded, size: total }
+                : u
+            )
+          );
+        },
+        item.file.size
       );
 
-      // DIRECTLY show uploaded files in the UI immediately
+      const serverErrors = uploadRes.data?.errors;
+      if (serverErrors?.length && (!uploadRes.data?.data || uploadRes.data.data.length === 0)) {
+        throw new Error(serverErrors[0].error || 'Upload failed');
+      }
+
+      setUploads((prev) =>
+        prev.map((u) =>
+          u.id === item.id
+            ? { ...u, progress: 100, status: 'complete', loaded: item.file.size, size: item.file.size }
+            : u
+        )
+      );
+
+      // Show uploaded files in the UI immediately (dedupe by file_id)
       if (uploadRes.data?.success && uploadRes.data?.data) {
         const createdFiles = Array.isArray(uploadRes.data.data)
           ? uploadRes.data.data
           : [uploadRes.data.data];
         setFiles((prev) => {
           const existingIds = new Set(prev.map((f) => f.file_id));
-          const fresh = createdFiles.filter((f) => !existingIds.has(f.file_id));
-          return [...fresh, ...prev];
+          const fresh = createdFiles.filter((f) => f?.file_id && !existingIds.has(f.file_id));
+          return fresh.length ? [...fresh, ...prev] : prev;
         });
       }
 
       showToast(`Uploaded "${item.name}"`, 'success');
     } catch (err) {
+      const msg =
+        err.response?.data?.message ||
+        err.message ||
+        'Network/server error';
       setUploads((prev) =>
-        prev.map((u) => (u.id === item.id ? { ...u, status: 'error' } : u))
+        prev.map((u) => (u.id === item.id ? { ...u, status: 'error', error: msg } : u))
       );
-      showToast(`Failed to upload "${item.name}"`, 'error');
+      showToast(`Failed to upload "${item.name}": ${msg}`, 'error');
     }
   };
 
-  // Fast concurrent upload handler (up to 3 parallel uploads)
+  // Concurrent upload handler (2 parallel — kinder to Drive/Sheets quotas)
   const handleUploadFiles = async (filesList) => {
     if (!filesList || filesList.length === 0) return;
 
-    const newUploads = filesList.map((file) => ({
-      id: Math.random().toString(36).substring(2, 9),
+    const accepted = [];
+    for (const file of filesList) {
+      if (file.size > MAX_UPLOAD_BYTES) {
+        showToast(
+          `"${file.name}" is ${formatFileSize(file.size)} — max is ${formatFileSize(MAX_UPLOAD_BYTES)}`,
+          'error'
+        );
+        continue;
+      }
+      if (file.size === 0) {
+        showToast(`"${file.name}" is empty and was skipped`, 'error');
+        continue;
+      }
+      accepted.push(file);
+    }
+    if (accepted.length === 0) return;
+
+    const newUploads = accepted.map((file) => ({
+      id: `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
       name: file.name,
       file,
       progress: 0,
@@ -207,9 +255,8 @@ export default function Dashboard() {
 
     setUploads((prev) => [...newUploads, ...prev]);
 
-    // Worker pool for 3 concurrent parallel uploads
     const queue = [...newUploads];
-    const MAX_CONCURRENT = 3;
+    const MAX_CONCURRENT = 2;
     const worker = async () => {
       while (queue.length > 0) {
         const item = queue.shift();
@@ -253,11 +300,24 @@ export default function Dashboard() {
     }
   };
 
-  // Download
+  // Download — large files use a direct authenticated URL (no full in-memory blob)
   const handleDownload = async (file) => {
     try {
       showToast(`Starting download: ${file.file_name}`, 'info');
-      const res = await fileService.downloadFile(file.file_id);
+      const size = Number(file.size_bytes || file.file_size || 0);
+      const LARGE = 25 * 1024 * 1024;
+      if (size > LARGE) {
+        const token = localStorage.getItem('drivex_admin_token') || '';
+        const qs = token ? `?token=${encodeURIComponent(token)}` : '';
+        const a = document.createElement('a');
+        a.href = `${API_BASE_URL}/files/${file.file_id}/download${qs}`;
+        a.download = file.file_name;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        return;
+      }
+      const res = await fileService.downloadFile(file.file_id, size);
       const url = window.URL.createObjectURL(new Blob([res.data]));
       const link = document.createElement('a');
       link.href = url;
@@ -266,8 +326,8 @@ export default function Dashboard() {
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
-    } catch {
-      showToast('Download failed', 'error');
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Download failed', 'error');
     }
   };
 

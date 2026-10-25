@@ -7,6 +7,7 @@ const uploadService = require('../services/uploadService');
 const AppError = require('../utils/AppError');
 const { appendRow, readSheet } = require('../config/googleSheets');
 const { generateId } = require('../utils/generateToken');
+const sanitizeFilename = require('../utils/sanitizeFilename');
 
 const uploadsDir = require('../utils/uploadsDir');
 
@@ -119,7 +120,12 @@ async function previewFile(req, res, next) {
     if (!file) throw new AppError('File not found', 404);
 
     let driveInfo = {};
-    if (file.drive_file_id && !file.drive_file_id.startsWith('local_')) {
+    const isRealDriveId =
+      file.drive_file_id &&
+      !file.drive_file_id.startsWith('local_') &&
+      !file.drive_file_id.startsWith('sheet_');
+
+    if (isRealDriveId) {
       try {
         driveInfo = await driveService.getFileInfo(file.drive_file_id);
       } catch (e) {
@@ -128,6 +134,9 @@ async function previewFile(req, res, next) {
     }
 
     const inlineDownloadUrl = `/api/v1/files/${file.file_id}/download?inline=true`;
+    const isImage =
+      (file.mime_type || '').startsWith('image/') ||
+      /\.(jpe?g|png|gif|webp|svg|bmp)$/i.test(file.file_name || '');
 
     res.json({
       success: true,
@@ -136,7 +145,8 @@ async function previewFile(req, res, next) {
         stream_url: inlineDownloadUrl,
         webViewLink: driveInfo.webViewLink || inlineDownloadUrl,
         webContentLink: driveInfo.webContentLink || inlineDownloadUrl,
-        thumbnailLink: driveInfo.thumbnailLink || (file.mime_type?.startsWith('image/') ? inlineDownloadUrl : ''),
+        thumbnailLink:
+          driveInfo.thumbnailLink || (isImage ? inlineDownloadUrl : ''),
       },
     });
   } catch (err) {
@@ -146,13 +156,17 @@ async function previewFile(req, res, next) {
 
 /**
  * GET /api/v1/files/:id/download
+ * Supports Range requests for video/audio seeking.
  */
 async function downloadFile(req, res, next) {
   try {
     const file = await sheetsService.getFileById(req.params.id);
     if (!file) throw new AppError('File not found', 404);
 
-    const isInline = req.query.inline === 'true' || req.query.view === 'true' || req.query.thumbnail === 'true';
+    const isInline =
+      req.query.inline === 'true' ||
+      req.query.view === 'true' ||
+      req.query.thumbnail === 'true';
     const mimeType = resolveMimeType(file.file_name, file.mime_type);
 
     const fileStreamObj = await fileStorageService.getFileStream(file);
@@ -161,23 +175,67 @@ async function downloadFile(req, res, next) {
       if (req.query.thumbnail === 'true') {
         return res.status(404).json({ success: false, message: 'Thumbnail not available' });
       }
-      throw new AppError('File content not found. This file may have expired from temporary storage. Please re-upload.', 404);
+      throw new AppError(
+        'File content not found. The file may be missing from storage. Please re-upload.',
+        404
+      );
     }
 
+    const totalSize = fileStreamObj.size ? Number(fileStreamObj.size) : undefined;
+    const range = req.headers.range;
+
+    res.setHeader('Accept-Ranges', 'bytes');
     res.setHeader('Content-Type', mimeType);
     res.setHeader(
       'Content-Disposition',
-      `${isInline ? 'inline' : 'attachment'}; filename="${encodeURIComponent(file.file_name)}"`
+      `${isInline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(file.file_name)}`
     );
 
-    if (fileStreamObj.size) {
-      res.setHeader('Content-Length', fileStreamObj.size);
+    if (isInline) {
+      res.setHeader('Cache-Control', 'private, max-age=86400, stale-while-revalidate=3600');
+    } else {
+      res.setHeader('Cache-Control', 'private, no-store');
     }
 
-    // Cache thumbnails and inline previews for 24 hours
-    if (isInline) {
-      res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=3600');
+    // Local file + Range → efficient partial reads (video/audio scrubbing)
+    if (
+      range &&
+      totalSize &&
+      fileStreamObj.path &&
+      fs.existsSync(fileStreamObj.path)
+    ) {
+      const parts = range.replace(/bytes=/, '').split('-');
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : totalSize - 1;
+      if (Number.isNaN(start) || start >= totalSize || end >= totalSize || start > end) {
+        res.status(416).setHeader('Content-Range', `bytes */${totalSize}`);
+        return res.end();
+      }
+      const chunkSize = end - start + 1;
+      res.status(206);
+      res.setHeader('Content-Range', `bytes ${start}-${end}/${totalSize}`);
+      res.setHeader('Content-Length', chunkSize);
+      const partial = fs.createReadStream(fileStreamObj.path, { start, end });
+      partial.on('error', (err) => {
+        console.warn('Partial stream error:', err.message);
+        if (!res.headersSent) next(err);
+        else res.destroy();
+      });
+      return partial.pipe(res);
     }
+
+    if (totalSize) {
+      res.setHeader('Content-Length', totalSize);
+    }
+
+    fileStreamObj.stream.on('error', (err) => {
+      console.warn('Download stream error:', err.message);
+      if (!res.headersSent) {
+        next(err);
+      } else {
+        res.destroy();
+      }
+    });
 
     return fileStreamObj.stream.pipe(res);
   } catch (err) {
@@ -228,15 +286,22 @@ async function renameFile(req, res, next) {
 
     // If stored locally, rename local file on disk
     try {
-      const oldExactPath = path.join(uploadsDir, `${file.file_id}_${file.file_name}`);
-      const newExactPath = path.join(uploadsDir, `${file.file_id}_${finalName}`);
-      if (fs.existsSync(oldExactPath)) {
+      const safeFinal = sanitizeFilename(finalName);
+      const newExactPath = path.join(uploadsDir, `${file.file_id}_${safeFinal}`);
+      const oldExactPath = path.join(
+        uploadsDir,
+        `${file.file_id}_${sanitizeFilename(file.file_name)}`
+      );
+      if (fs.existsSync(oldExactPath) && oldExactPath !== newExactPath) {
         fs.renameSync(oldExactPath, newExactPath);
       } else if (fs.existsSync(uploadsDir)) {
         const files = fs.readdirSync(uploadsDir);
-        const match = files.find((f) => f.startsWith(`${file.file_id}_`));
+        const match = files.find(
+          (f) => f.startsWith(`${file.file_id}_`) && !f.startsWith('tmp_')
+        );
         if (match) {
-          fs.renameSync(path.join(uploadsDir, match), newExactPath);
+          const from = path.join(uploadsDir, match);
+          if (from !== newExactPath) fs.renameSync(from, newExactPath);
         }
       }
     } catch (fsErr) {
@@ -244,7 +309,11 @@ async function renameFile(req, res, next) {
     }
 
     // If in Google Drive, rename in Drive
-    if (file.drive_file_id && !file.drive_file_id.startsWith('local_')) {
+    if (
+      file.drive_file_id &&
+      !file.drive_file_id.startsWith('local_') &&
+      !file.drive_file_id.startsWith('sheet_')
+    ) {
       driveService.renameDriveFile(file.drive_file_id, finalName).catch((e) => {
         console.warn('Drive rename sync notice:', e.message);
       });
@@ -315,7 +384,12 @@ async function moveFile(req, res, next) {
     if (!updated) throw new AppError('File not found', 404);
 
     // If in Google Drive and target folder has drive folder ID, sync move in Drive
-    if (file.drive_file_id && !file.drive_file_id.startsWith('local_') && targetDriveFolderId) {
+    if (
+      file.drive_file_id &&
+      !file.drive_file_id.startsWith('local_') &&
+      !file.drive_file_id.startsWith('sheet_') &&
+      targetDriveFolderId
+    ) {
       driveService.moveDriveFile(file.drive_file_id, targetDriveFolderId).catch((e) => {
         console.warn('Drive move sync notice:', e.message);
       });
@@ -489,17 +563,47 @@ async function reuploadFile(req, res, next) {
       throw new AppError('No file provided for re-upload', 400);
     }
 
-    const { driveFileId } = await fileStorageService.saveFile(
+    // Remove previous content first to avoid orphan Drive/Sheets data
+    try {
+      await fileStorageService.deleteFileContent(file);
+    } catch (e) {
+      console.warn('Reupload cleanup notice:', e.message);
+    }
+
+    let targetDriveFolderId;
+    if (file.folder_id) {
+      try {
+        const rows = await readSheet('Folders');
+        const folderRow = rows.slice(1).find((r) => r[0] === file.folder_id);
+        if (folderRow && folderRow[4]) targetDriveFolderId = folderRow[4];
+      } catch (e) {}
+    }
+
+    const source = uploaded.path
+      ? { path: uploaded.path, size: uploaded.size }
+      : { buffer: uploaded.buffer, size: uploaded.size };
+
+    const { driveFileId, size } = await fileStorageService.saveFile(
       file.file_id,
-      uploaded.buffer,
+      source,
       uploaded.originalname || file.file_name,
       uploaded.mimetype || file.mime_type,
-      file.folder_id || undefined
+      targetDriveFolderId || undefined
     );
 
+    if (uploaded.path && fs.existsSync(uploaded.path)) {
+      const cachePath = fileStorageService.localCachePath(
+        file.file_id,
+        uploaded.originalname || file.file_name
+      );
+      if (path.resolve(uploaded.path) !== path.resolve(cachePath)) {
+        fileStorageService.cleanupTempUpload(uploaded.path);
+      }
+    }
+
     const updated = await sheetsService.updateFile(file.file_id, {
-      file_name: uploaded.originalname || file.file_name,
-      size_bytes: uploaded.size,
+      file_name: sanitizeFilename(uploaded.originalname || file.file_name),
+      size_bytes: size || uploaded.size,
       mime_type: uploaded.mimetype || file.mime_type,
       drive_file_id: driveFileId,
     });
@@ -510,6 +614,7 @@ async function reuploadFile(req, res, next) {
       data: updated,
     });
   } catch (err) {
+    if (req.file?.path) fileStorageService.cleanupTempUpload(req.file.path);
     next(err);
   }
 }

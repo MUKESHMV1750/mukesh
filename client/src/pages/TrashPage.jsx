@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { LayoutGrid, List, Trash2, RotateCcw, AlertOctagon, Inbox, AlertCircle, RefreshCw } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import Sidebar from '../components/Sidebar';
@@ -31,10 +31,15 @@ export default function TrashPage() {
   const [actionTarget, setActionTarget] = useState(null); // { type: 'restore' | 'delete' | 'empty', file }
   const [actionLoading, setActionLoading] = useState(false);
 
+  const filesLenRef = useRef(files.length);
+  useEffect(() => {
+    filesLenRef.current = files.length;
+  }, [files.length]);
+
   const loadTrash = useCallback(async () => {
-    if (files.length === 0) setLoading(true);
+    if (filesLenRef.current === 0) setLoading(true);
     setLoadError(null);
-    const timeout = setTimeout(() => setLoading(false), 8000);
+    const timeout = setTimeout(() => setLoading(false), 15000);
     try {
       const res = await fileService.listFiles({ status: 'trashed', is_trashed: 'true', trashed: 'true' });
       if (res.data?.success) {
@@ -44,12 +49,12 @@ export default function TrashPage() {
       }
     } catch (err) {
       setLoadError(err.response?.data?.message || err.message || 'Failed to load trash items');
-      if (files.length === 0) showToast('Failed to load trash items', 'error');
+      if (filesLenRef.current === 0) showToast('Failed to load trash items', 'error');
     } finally {
       clearTimeout(timeout);
       setLoading(false);
     }
-  }, [showToast, files.length]);
+  }, [showToast]);
 
   useEffect(() => {
     loadTrash();

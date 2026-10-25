@@ -11,13 +11,16 @@ async function createShare(req, res, next) {
     const file = await sheetsService.getFileById(req.params.id);
     if (!file) throw new AppError('File not found', 404);
 
-    const expiresInHours = req.body.expires_in_hours || 24;
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
+    const expiresInHours = Number(req.body.expires_in_hours) || 24;
+    // API host for download_url (works behind proxies)
+    const proto = req.get('x-forwarded-proto') || req.protocol;
+    const host = req.get('x-forwarded-host') || req.get('host');
+    const apiBaseUrl = `${proto}://${host}`;
 
     const shareData = await shareService.createShareLink(
       file.file_id,
       file.file_name,
-      baseUrl,
+      apiBaseUrl,
       expiresInHours
     );
 
@@ -59,21 +62,29 @@ async function accessSharedFile(req, res, next) {
 
     const file = await sheetsService.getFileById(validation.share.file_id);
     if (!file) throw new AppError('File not found', 404);
-
-    res.setHeader('Content-Type', file.mime_type || 'application/octet-stream');
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${encodeURIComponent(file.file_name)}"`
-    );
+    if (file.is_trashed) throw new AppError('This shared file is no longer available', 404);
 
     const fileStreamObj = await fileStorageService.getFileStream(file);
     if (!fileStreamObj) {
       throw new AppError('File content not found or expired', 404);
     }
 
+    res.setHeader('Content-Type', file.mime_type || 'application/octet-stream');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename*=UTF-8''${encodeURIComponent(file.file_name)}`
+    );
+    res.setHeader('Cache-Control', 'private, no-store');
+
     if (fileStreamObj.size) {
       res.setHeader('Content-Length', fileStreamObj.size);
     }
+
+    fileStreamObj.stream.on('error', (err) => {
+      console.warn('Share download stream error:', err.message);
+      if (!res.headersSent) next(err);
+      else res.destroy();
+    });
 
     return fileStreamObj.stream.pipe(res);
   } catch (err) {

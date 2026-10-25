@@ -73,9 +73,9 @@ if (config.nodeEnv === 'development') {
   app.use(morgan('dev'));
 }
 
-// Body parsers
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Body parsers (multipart uploads use multer disk storage — not these parsers)
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
 // Session
 app.use(

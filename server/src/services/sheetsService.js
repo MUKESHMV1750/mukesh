@@ -53,7 +53,15 @@ async function getAllFiles(filters = {}) {
   const rows = await readSheet(SHEET_NAME);
   if (rows.length <= 1) return []; // only header
 
-  let files = rows.slice(1).map(rowToFile);
+  // Dedupe by file_id (keep first / oldest row) to prevent duplicate UI records
+  const seenIds = new Set();
+  let files = [];
+  for (const row of rows.slice(1)) {
+    const parsed = rowToFile(row);
+    if (!parsed.file_id || seenIds.has(parsed.file_id)) continue;
+    seenIds.add(parsed.file_id);
+    files.push(parsed);
+  }
 
   if (filters.folder_id !== undefined) {
     files = files.filter((f) => f.folder_id === filters.folder_id);
@@ -91,7 +99,8 @@ async function getAllFiles(filters = {}) {
  */
 async function getFileById(fileId) {
   const rows = await readSheet(SHEET_NAME);
-  const row = rows.find((r) => r[COL.FILE_ID] === fileId);
+  // Skip header row
+  const row = rows.slice(1).find((r) => r[COL.FILE_ID] === fileId);
   return row ? rowToFile(row) : null;
 }
 
